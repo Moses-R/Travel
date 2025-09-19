@@ -1,0 +1,270 @@
+/* src/components/css/TripModal.css
+   Theme-aware styles for TripModal (and general modal controls)
+   Uses .light-theme and .dark-theme on a parent (e.g. <div className="light-theme">) */
+
+:root {
+  --radius-md: 10px;
+  --radius-sm: 6px;
+  --transition-fast: 150ms ease;
+  --shadow-soft: 0 6px 20px rgba(0,0,0,0.12);
+  --shadow-strong: 0 10px 30px rgba(0,0,0,0.2);
+  --glass: rgba(255,255,255,0.04);
+}
+
+/* --- theme variables --- */
+.light-theme {
+  --bg: #ffffff;
+  --panel-bg: #ffffff;
+  --text: #111827;
+  --muted: #6b7280;
+  --accent: #2563eb; /* blue-600 */
+  --accent-contrast: #ffffff;
+  --btn-primary-bg: var(--accent);
+  --btn-primary-text: var(--accent-contrast);
+  --btn-secondary-bg: #f3f4f6; /* gray-100 */
+  --btn-secondary-text: #111827;
+  --input-bg: #fff;
+  --input-border: #e5e7eb;
+  --backdrop-bg: rgba(15, 23, 42, 0.45); /* slightly warm */
+  --danger: #dc2626;
+}
+
+.dark-theme {
+  --bg: #0b1220;
+  --panel-bg: #0f1724;
+  --text: #e6eef8;
+  --muted: #9aa7bf;
+  --accent: #60a5fa; /* sky-400 for contrast in dark */
+  --accent-contrast: #06233a;
+  --btn-primary-bg: var(--accent);
+  --btn-primary-text: var(--accent-contrast);
+  --btn-secondary-bg: rgba(255,255,255,0.06);
+  --btn-secondary-text: #e6eef8;
+  --input-bg: #071021;
+  --input-border: rgba(255,255,255,0.06);
+  --backdrop-bg: rgba(2,6,23,0.7);
+  --danger: #f87171;
+}
+
+/* --- backdrop --- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--backdrop-bg);
+  z-index: 1000;
+  padding: 24px;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+/* --- modal card --- */
+.modal {
+  width: 520px;
+  max-width: 100%;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  background-color: var(--panel-bg);
+  color: var(--text);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-soft);
+  padding: 20px;
+  box-sizing: border-box;
+  border: 1px solid rgba(255,255,255,0.04);
+  transform-origin: center;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+/* subtle elevation on open (if you animate) */
+.modal.open {
+  transform: translateY(-6px);
+  box-shadow: var(--shadow-strong);
+}
+
+/* header */
+.modal h3 {
+  margin: 0 0 12px 0;
+  font-size: 18px;
+  line-height: 1.2;
+  color: var(--text);
+}
+
+/* form layout */
+.modal form {
+  display: block;
+}
+
+/* form fields */
+.modal label {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.modal input[type="text"],
+.modal input[type="date"],
+.modal input[type="email"],
+.modal textarea,
+.modal select {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-sm);
+  box-sizing: border-box;
+  outline: none;
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+}
+
+.modal input::placeholder,
+.modal textarea::placeholder {
+  color: rgba(0,0,0,0.35);
+}
+
+.dark-theme .modal input::placeholder,
+.dark-theme .modal textarea::placeholder {
+  color: rgba(255,255,255,0.18);
+}
+
+.modal input:focus,
+.modal textarea:focus,
+.modal select:focus {
+  box-shadow: 0 4px 18px rgba(37,99,235,0.12);
+  border-color: var(--accent);
+}
+
+/* textarea */
+.modal textarea {
+  min-height: 78px;
+  resize: vertical;
+  line-height: 1.4;
+}
+
+/* row helper */
+.modal .row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* column children flex */
+.modal .row > div {
+  flex: 1;
+}
+
+/* small spacing helpers */
+.modal > * + * { margin-top: 10px; }
+
+/* error message */
+.modal .error {
+  color: var(--danger);
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+/* control bar */
+.modal .controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), opacity var(--transition-fast);
+  border: 1px solid transparent;
+}
+
+.btn:active { transform: translateY(1px); }
+
+/* primary */
+.btn-primary {
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  border-color: transparent;
+  box-shadow: 0 6px 18px rgba(37,99,235,0.12);
+}
+
+.btn-primary:hover {
+  filter: brightness(0.98);
+  box-shadow: 0 10px 24px rgba(37,99,235,0.14);
+}
+
+/* secondary */
+.btn-secondary {
+  background: var(--btn-secondary-bg);
+  color: var(--btn-secondary-text);
+  border: 1px solid rgba(0,0,0,0.04);
+}
+
+.dark-theme .btn-secondary {
+  border: 1px solid rgba(255,255,255,0.04);
+}
+
+/* disabled */
+.btn[disabled],
+.btn.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* small (cancel) */
+.btn-small {
+  padding: 6px 10px;
+  font-size: 13px;
+  border-radius: 6px;
+}
+
+/* danger */
+.btn-danger {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid rgba(220, 38, 38, 0.12);
+}
+
+/* helpers for layout within modal (used in JSX) */
+.modal .field-inline {
+  display: flex;
+  gap: 8px;
+}
+
+.modal .muted {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* responsive */
+@media (max-width: 540px) {
+  .modal {
+    padding: 14px;
+    width: 100%;
+    border-radius: 8px;
+  }
+
+  .modal h3 { font-size: 16px; }
+}
+
+/* Accessibility: focus outline for keyboard users */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 3px solid rgba(99,102,241,0.14);
+  outline-offset: 2px;
+}

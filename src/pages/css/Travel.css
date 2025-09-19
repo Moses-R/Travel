@@ -1,0 +1,267 @@
+/* src/pages/css/Travel.css
+   Theme-aware Travel page styles — green accent matching Home
+*/
+
+/* --------------------------
+   Global tokens (fallback)
+   -------------------------- */
+:root {
+  --accent: #059669;        /* primary green */
+  --accent-600: #047857;    /* darker green */
+  --accent-900: #064e3b;
+  --bg: #ffffff;
+  --page-bg: #ffffff;
+  --text: #0f172a;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --input-bg: #ffffff;
+  --input-border: #d1d5db;
+  --gallery-bg: #f8fafc;
+  --card-shadow: 0 6px 18px rgba(15,23,42,0.08);
+  --modal-overlay: rgba(0,0,0,0.45);
+  --radius-lg: 12px;
+  --radius-md: 8px;
+}
+
+/* Light / Dark theme roots (apply to documentElement via ThemeProvider) */
+.light-theme {
+  --bg: #ffffff;
+  --page-bg: linear-gradient(180deg, #fbfcfd 0%, #ffffff 100%);
+  --text: #0f172a;
+  --muted: #6b7280;
+  --input-bg: #ffffff;
+  --input-border: #e6e6e6;
+  --gallery-bg: #fafafa;
+  --card-shadow: 0 6px 18px rgba(15,23,42,0.08);
+  color-scheme: light;
+}
+
+.dark-theme {
+  --bg: #071026;
+  --page-bg: linear-gradient(180deg, #031028 0%, #071026 100%);
+  --text: #e6eef8;
+  --muted: #9aa8bd;
+  --input-bg: #07101a;
+  --input-border: #1f2a37;
+  --gallery-bg: #0f1724;
+  --card-shadow: 0 10px 30px rgba(2,6,23,0.6);
+  --modal-overlay: rgba(2,8,23,0.7);
+  color-scheme: dark;
+}
+
+/* Layout */
+.travel-container {
+  max-width: 1200px;
+  margin: auto;
+  padding: 20px;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  background: transparent;
+  color: var(--text);
+}
+
+/* Header */
+.travel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+.travel-header h1 {
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--text);
+}
+.travel-header button {
+  margin-left: 8px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+/* Buttons — primary (start/save), secondary (stop/cancel) */
+.btn-start {
+  background: linear-gradient(90deg, var(--accent), var(--accent-600));
+  color: #fff;
+  border: 1px solid transparent;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 700;
+  box-shadow: var(--card-shadow);
+}
+.btn-start.small { padding: 6px 10px; font-size: 13px; }
+
+.btn-stop {
+  background: var(--btn-stop-bg, #f3f4f6);
+  color: var(--btn-stop-text, var(--text));
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+/* small buttons */
+.btn-small {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+
+/* danger / link styles */
+.btn-danger, .btn-link-danger {
+  background: transparent;
+  color: var(--danger, #ef4444);
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.btn-cancel {
+  background: var(--btn-stop-bg, #f3f4f6);
+  color: var(--btn-stop-text, var(--text));
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+
+/* export */
+.btn-export {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+/* Map */
+.map-box {
+  height: 380px;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 20px;
+  border: 1px solid var(--border);
+  background: var(--page-bg);
+}
+
+/* Section cards */
+.section {
+  background: var(--page-bg);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 20px;
+  box-shadow: var(--card-shadow);
+  border: 1px solid var(--border);
+}
+.section h2 { font-size: 1.1rem; margin-bottom: 8px; color: var(--text); }
+
+/* Gallery */
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.gallery-item {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--gallery-bg);
+}
+.gallery-item img,
+.gallery-item video {
+  width: 100%;
+  height: 140px;
+  object-fit: cover;
+}
+.gallery-item .info {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+/* Itinerary */
+.itinerary { list-style: none; padding: 0; margin: 0; }
+.itinerary li {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 8px;
+  background: var(--page-bg);
+}
+.itinerary li .place { font-weight: 600; color: var(--text); }
+.itinerary li .date { font-size: 12px; color: var(--muted); }
+.itinerary li .notes { margin-top: 4px; font-size: 14px; color: var(--text); }
+
+/* Form controls */
+.itinerary-form input,
+.itinerary-form textarea,
+input[type="file"] {
+  width: 100%;
+  border: 1px solid var(--input-border);
+  padding: 8px;
+  margin-top: 8px;
+  border-radius: 8px;
+  font-size: 14px;
+  background: var(--input-bg);
+  color: var(--text);
+  box-sizing: border-box;
+}
+.itinerary-form input:focus,
+.itinerary-form textarea:focus,
+input[type="file"]:focus {
+  outline: none;
+  border-color: var(--accent-600);
+  box-shadow: 0 6px 18px rgba(4,120,87,0.08);
+}
+
+/* Modal overlay & box */
+.modal-overlay {
+  position: fixed; inset: 0; display:flex; align-items:center; justify-content:center; z-index:999;
+  background: var(--modal-overlay);
+}
+.modal-box {
+  background: var(--page-bg);
+  padding: 20px;
+  border-radius: 8px;
+  width: 420px;
+  max-width: 94%;
+  box-shadow: var(--card-shadow);
+  border: 1px solid var(--border);
+}
+.modal-actions { margin-top: 12px; display:flex; justify-content:flex-end; gap:8px; }
+
+/* small helpers */
+.muted { color: var(--muted) !important; }
+
+/* media preview */
+.media-preview { width: 100%; border-radius: 6px; border: 1px solid var(--border); background: #000; display: block; }
+
+/* saved-trip list */
+.saved-trip-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.saved-trip { padding: 8px; border-radius: 8px; background: transparent; border: 1px solid transparent; transition: background .15s ease, border-color .15s ease; }
+.saved-trip.active { background: linear-gradient(90deg, rgba(5,150,105,0.07), rgba(4,120,87,0.04)); border-color: rgba(4,120,87,0.12); }
+
+/* small responsive tweaks */
+@media (max-width: 980px) {
+  .travel-container { padding: 16px; }
+  .map-box { height: 300px; }
+  .travel-header h1 { font-size: 1.5rem; }
+  .itinerary-form input, .itinerary-form textarea { font-size: 13px; }
+}
+
+/* ensure focusable interactive elements look accessible */
+button:focus, input:focus, textarea:focus {
+  outline: none;
+  box-shadow: 0 8px 24px rgba(4,120,87,0.08);
+}
+
+/* Force any inline color usage in this subtree to use vars (last-resort override) */
+.travel-container *[style*="color:"] {
+  color: var(--text) !important;
+}

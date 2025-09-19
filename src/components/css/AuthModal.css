@@ -1,0 +1,117 @@
+/* src/components/AuthModal.css */
+.auth-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+}
+
+.auth-modal {
+  background: white;
+  width: 420px;
+  max-width: 92%;
+  border-radius: 10px;
+  padding: 18px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+  position: relative;
+}
+
+.auth-close {
+  position: absolute;
+  right: 12px;
+  top: 10px;
+  background: transparent;
+  border: none;
+  font-size: 22px;
+  cursor: pointer;
+}
+
+.auth-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.tab {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #eee;
+  background: #fafafa;
+  cursor: pointer;
+}
+
+.tab.active {
+  background: #111827;
+  color: white;
+  border-color: #111827;
+}
+
+.auth-form input {
+  width: 100%;
+  padding: 10px 12px;
+  margin-top: 8px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.auth-error {
+  color: #b91c1c;
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+.auth-footer {
+  margin-top: 14px;
+  font-size: 13px;
+  color: #555;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: #0b5fff;
+  cursor: pointer;
+  padding: 0;
+  font-size: 13px;
+}
+
+/* reuse some generic btn classes (if you already have them, skip) */
+.btn {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #ddd;
+  background: #fff;
+  cursor: pointer;
+}
+.btn.primary {
+  background: #0b5fff;
+  color: white;
+  border-color: #0b5fff;
+}
+.small-tab {
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid #eee;
+  background: #fafafa;
+  cursor: pointer;
+  font-size: 13px;
+}
+.small-tab.active {
+  background: #111827;
+  color: white;
+  border-color: #111827;
+}
+
+.btn.google {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #ddd;
+  background: white;
+  cursor: pointer;
+}

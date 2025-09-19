@@ -1,13 +1,66 @@
-body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+/* src/index.css (append these or merge into your global CSS) */
+
+/* Base (light) theme tokens */
+:root {
+  --bg: #ffffff;
+  --muted: #6b7280;
+  --accent: #059669;
+  --accent-600: #047857;
+  --card-shadow: 0 6px 18px rgba(15,23,42,0.08);
+  --glass: rgba(0,0,0,0.35);
+  --text: #0f172a;
+  --muted-2: #94a3b8;
+  --page-bg: linear-gradient(180deg, #fbfcfd 0%, #ffffff 100%);
 }
 
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+/* Theme variables - put in src/index.css (global) */
+
+.light-theme {
+  --bg: #ffffff;
+  --muted: #6b7280;
+  --accent: #059669;
+  --accent-600: #047857;
+  --card-shadow: 0 6px 18px rgba(15,23,42,0.08);
+  --text: #0f172a;
+  --page-bg: linear-gradient(180deg, #fbfcfd 0%, #ffffff 100%);
+  color-scheme: light;
 }
+
+.dark-theme {
+  --bg: #071026; /* card / surface */
+  --muted: #94a3b8;
+  --accent: #10b981;
+  --accent-600: #059669;
+  --card-shadow: 0 10px 30px rgba(2,6,23,0.6);
+  --text: #e6eef6;
+  --page-bg: linear-gradient(180deg, #031028 0%, #071026 100%);
+  color-scheme: dark;
+}
+
+/* Apply base */
+.light-theme, .dark-theme {
+  min-height: 100vh;
+  transition: background .25s ease, color .25s ease;
+  background: var(--page-bg);
+  color: var(--text);
+}
+
+
+/* Make sure body doesn't override the wrapper styles */
+body {
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  background: transparent;
+}
+
+/* Example: adjust some common elements if needed */
+.light-theme .card { background: var(--bg); box-shadow: var(--card-shadow); }
+.dark-theme .card  { background: var(--bg); box-shadow: var(--card-shadow); }
+
+/* links */
+.light-theme a { color: var(--accent); }
+.dark-theme a  { color: var(--accent); }
+
+/* Buttons — simple example */
+.light-theme .hp-btn.primary { background: var(--accent); color: #fff; }
+.dark-theme  .hp-btn.primary { background: var(--accent); color: #071124; }

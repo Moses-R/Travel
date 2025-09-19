@@ -2,16 +2,16 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { ThemeProvider } from "./context/ThemeContext";
 import "./index.css";
 import reportWebVitals from "./reportWebVitals";
 import { AuthProvider } from "./context/AuthContext";
-import { ThemeProvider } from "./context/ThemeContext";
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 
 root.render(
   <React.StrictMode>
-    <ThemeProvider>
+    <ThemeProvider initial="dark">
       <AuthProvider>
         <App />
       </AuthProvider>
@@ -19,4 +19,5 @@ root.render(
   </React.StrictMode>
 );
 
+// If you want to measure performance:
 reportWebVitals();

@@ -1,0 +1,21 @@
+.edit-trip-form .field {
+    margin-bottom: 10px;
+    display: block;
+}
+
+.edit-trip-form .label {
+    font-size: 13px;
+    color: #666;
+    margin-bottom: 6px;
+}
+
+.edit-trip-form input,
+.edit-trip-form textarea,
+.edit-trip-form select {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid #e0e0e0;
+    font-size: 14px;
+    box-sizing: border-box;
+}

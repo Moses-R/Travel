@@ -1,0 +1,159 @@
+/* src/components/css/Modal.css
+   Themeable via [data-theme="light"] and [data-theme="dark"] on <html> or <body>
+*/
+
+/* default variables (light) */
+:root {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --muted: #666666;
+  --text: #111827;
+  --overlay: rgba(0, 0, 0, 0.45);
+  --shadow: 0 10px 30px rgba(0,0,0,0.12);
+  --btn-primary-bg: #0b79ff;
+  --btn-primary-text: #ffffff;
+  --btn-muted-bg: #eeeeee;
+  --btn-danger-bg: #ef4444;
+  --modal-border: rgba(0,0,0,0.06);
+}
+
+/* dark theme variables */
+[data-theme="dark"] {
+  --bg: #0b1220;               /* app background */
+  --surface: #0f1724;          /* card / modal background */
+  --muted: #a1a1aa;
+  --text: #e6eef8;
+  --overlay: rgba(0, 0, 0, 0.6);
+  --shadow: 0 10px 30px rgba(0,0,0,0.6);
+  --btn-primary-bg: #2563eb;
+  --btn-primary-text: #ffffff;
+  --btn-muted-bg: #1f2937;
+  --btn-danger-bg: #ef4444;
+  --modal-border: rgba(255,255,255,0.04);
+}
+
+/* overlay covers whole screen */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+  padding: 16px;
+}
+
+/* modal box */
+.modal-box {
+  width: 100%;
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  max-height: 90vh;
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid var(--modal-border);
+}
+
+/* header */
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.modal-title {
+  margin: 0;
+  font-size: 18px;
+  color: var(--text);
+}
+
+.modal-close {
+  background: transparent;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px;
+  color: var(--muted);
+}
+
+/* main content area */
+.modal-content {
+  margin-top: 12px;
+  color: var(--text);
+}
+
+/* Buttons */
+.btn-save {
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  border: none;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.btn-cancel {
+  background: var(--btn-muted-bg);
+  color: var(--text);
+  border: none;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.btn-danger {
+  background: var(--btn-danger-bg);
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+/* Actions alignment */
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* small helpers to make inputs match theme */
+.itinerary-form input,
+.itinerary-form textarea,
+.modal-content input,
+.modal-content textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--modal-border);
+  background: transparent;
+  color: var(--text);
+  margin-top: 8px;
+  box-sizing: border-box;
+}
+
+.itinerary-form textarea,
+.modal-content textarea {
+  min-height: 80px;
+}
+
+/* focus state */
+.itinerary-form input:focus,
+.itinerary-form textarea:focus,
+.modal-content input:focus,
+.modal-content textarea:focus {
+  outline: 2px solid rgba(11,121,255,0.12);
+  border-color: rgba(11,121,255,0.28);
+}
+
+/* small responsive tweaks */
+@media (max-width: 520px) {
+  .modal-box { padding: 12px; border-radius: 8px; }
+  .modal-title { font-size: 16px; }
+}

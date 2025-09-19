@@ -1,5 +1,5 @@
 // src/pages/Travel.jsx
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -42,20 +42,6 @@ const useFirebase = Boolean(isFirebaseConfigured && firebaseApp && auth && db &&
 const localUid = (prefix = "trip") =>
   `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-function slugify(text = "") {
-  return (
-    text
-      .toString()
-      .trim()
-      .toLowerCase()
-      .replace(/\s+/g, "-")
-      .replace(/[^\w\-]+/g, "")
-      .replace(/\-\-+/g, "-")
-      .replace(/^-+/, "")
-      .replace(/-+$/, "") || `trip-${Date.now().toString(36)}`
-  );
-}
-
 function normalizeDate(d) {
   if (!d) return null;
   const dt = d instanceof Date ? d : new Date(d);
@@ -70,6 +56,40 @@ async function uploadFileToStorage(userId, tripId, file) {
   const snapshot = await uploadBytes(ref, file);
   const url = await getDownloadURL(snapshot.ref);
   return url;
+}
+
+// GoogleEmbedMap: renders either an iframe src URL or a full iframe HTML string.
+function GoogleEmbedMap({ embedHtmlOrUrl, height = 340 }) {
+  if (!embedHtmlOrUrl) {
+    return (
+      <div className="map-box section" style={{ height }}>
+        <div className="muted" style={{
+          height: "100%", display: "flex", alignItems: "center", justifyContent: "center"
+        }}>
+          No Google map embed provided.
+        </div>
+      </div>
+    );
+  }
+
+  // Accept either full <iframe ...> HTML or a raw src URL
+  const srcMatch = String(embedHtmlOrUrl).match(/src=["']([^"']+)["']/);
+  const src = srcMatch ? srcMatch[1] : embedHtmlOrUrl;
+
+  return (
+    <div className="map-box section" style={{ height, overflow: "hidden", borderRadius: 8 }}>
+      <iframe
+        title="Custom Google Map"
+        src={src}
+        width="100%"
+        height="100%"
+        style={{ border: 0 }}
+        loading="lazy"
+        referrerPolicy="no-referrer-when-downgrade"
+        allowFullScreen
+      />
+    </div>
+  );
 }
 
 /* ---------- component ---------- */
@@ -125,6 +145,106 @@ export default function Travel() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [tripToEdit, setTripToEdit] = useState(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [confirmItin, setConfirmItin] = useState({ open: false, id: null, title: null });
+  const [googleEmbedInput, setGoogleEmbedInput] = useState("");
+  const [showEmbedModal, setShowEmbedModal] = useState(false);
+  const [confirmRemoveYoutube, setConfirmRemoveYoutube] = React.useState(false);
+  const [youtubeInput, setYoutubeInput] = useState("");
+  const [savingYouTube, setSavingYouTube] = useState(false);
+  const [showYoutubeModal, setShowYoutubeModal] = useState(false);
+
+  // Derived helper used in JSX to decide owner-only UI
+  const isOwner = Boolean(user && selectedTrip && (user.uid === selectedTrip.ownerId || user.uid === selectedTrip.owner_id));
+
+  // helper: extract src from iframe HTML or return the raw URL
+  function extractEmbedSrc(input) {
+    if (!input) return "";
+    const m = String(input).match(/src=["']([^"']+)["']/);
+    if (m && m[1]) return m[1];
+    // also allow URL with query params that looks like google maps embed link
+    return String(input).trim();
+  }
+
+  async function saveGoogleEmbedForSelectedTrip() {
+    if (!selectedTrip || !selectedTrip.trip_id) {
+      setToast({ msg: "Select a trip first", type: "warning" });
+      setTimeout(() => setToast(null), 2000);
+      return;
+    }
+    const src = extractEmbedSrc(googleEmbedInput || selectedTrip.googleEmbed || "");
+    if (!src) {
+      setToast({ msg: "Please paste an iframe or embed URL", type: "warning" });
+      setTimeout(() => setToast(null), 2200);
+      return;
+    }
+
+    // update local UI immediately
+    const payload = { trip_id: selectedTrip.trip_id, googleEmbed: src };
+    applyLocalEdit(payload);
+    setSelectedTrip((s) => s ? { ...s, googleEmbed: src } : s);
+    setToast({ msg: "Map embed applied", type: "success" });
+    setTimeout(() => setToast(null), 1400);
+
+    // persist to Firestore if configured and current user is the owner
+    const isOwner = user && (selectedTrip.ownerId === user.uid || selectedTrip.owner_id === user.uid);
+    if (useFirebase && db && user && isOwner) {
+      try {
+        const dr = doc(db, "trips", selectedTrip.trip_id);
+        await updateDoc(dr, { googleEmbed: src, updatedAt: new Date().toISOString() });
+        setToast({ msg: "Map embed saved to trip", type: "success" });
+        setTimeout(() => setToast(null), 1400);
+        return;
+      } catch (err) {
+        console.error("save google embed to firestore failed", err);
+        setToast({ msg: "Saved locally (failed to persist)", type: "warning" });
+        setTimeout(() => setToast(null), 2000);
+      }
+    } else {
+      // local-only
+      setToast({ msg: "Embed stored locally (not persisted)", type: "info" });
+      setTimeout(() => setToast(null), 1400);
+    }
+  }
+  // top-level helper: remove youtubeId from current selectedTrip (no confirm here — modal handles confirmation)
+  async function clearYouTubeFromTrip() {
+    if (!selectedTrip || !selectedTrip.trip_id) return;
+
+    try {
+      const isOwner = user && (selectedTrip.ownerId === user.uid || selectedTrip.owner_id === user.uid);
+
+      if (isOwner && useFirebase && db) {
+        const dr = doc(db, "trips", selectedTrip.trip_id);
+        await updateDoc(dr, { youtubeId: "", updatedAt: new Date().toISOString() });
+        applyLocalEdit && applyLocalEdit({ trip_id: selectedTrip.trip_id, youtubeId: "" });
+      } else {
+        // local-only fallback
+        applyLocalEdit && applyLocalEdit({ trip_id: selectedTrip.trip_id, youtubeId: "" });
+      }
+
+      setToast && setToast({ msg: "YouTube link removed", type: "info" });
+      setTimeout(() => setToast && setToast(null), 1200);
+    } catch (err) {
+      console.error("clearYouTubeFromTrip failed", err);
+      setToast && setToast({ msg: "Failed to remove link", type: "warning" });
+      setTimeout(() => setToast && setToast(null), 1400);
+    }
+  }
+
+  // helper: extract YouTube video id from many forms (url, embed, short)
+  function extractYouTubeId(input) {
+    if (!input) return null;
+    const s = String(input).trim();
+    // iframe src
+    const srcMatch = s.match(/src=["']([^"']+)["']/);
+    const candidate = srcMatch ? srcMatch[1] : s;
+    // common patterns
+    const m =
+      candidate.match(/(?:v=)([A-Za-z0-9_\-]{6,})/) ||
+      candidate.match(/(?:youtu\.be\/)([A-Za-z0-9_\-]{6,})/) ||
+      candidate.match(/\/embed\/([A-Za-z0-9_\-]{6,})/) ||
+      candidate.match(/youtube\.com\/shorts\/([A-Za-z0-9_\-]{6,})/);
+    return m ? m[1] : null;
+  }
 
   // ---------- helper: visibility ----------
   function getVisibilityInfo(trip, user) {
@@ -610,7 +730,133 @@ export default function Travel() {
     return uploaded;
   }
 
-  const addItinerary = (item) => setItinerary((s) => [item, ...s]);
+  // ---------- NEW: save itinerary to Firestore helper ----------
+  async function saveItineraryForTrip(tripId, newItinerary) {
+    if (!useFirebase || !db) {
+      // Not configured — nothing to persist
+      return { ok: false, reason: "no-firebase" };
+    }
+    if (!tripId) return { ok: false, reason: "no-trip-id" };
+    try {
+      const docRef = doc(db, "trips", tripId);
+      // update only itinerary and updatedAt to avoid overwrite
+      await updateDoc(docRef, { itinerary: newItinerary, updatedAt: new Date().toISOString() });
+      return { ok: true };
+    } catch (err) {
+      console.error("[Travel] saveItineraryForTrip failed:", err);
+      return { ok: false, reason: err?.message || String(err) };
+    }
+  }
+  // open confirm modal for itinerary item
+  const confirmDeleteItinerary = (itemId, title = "") => {
+    setConfirmItin({ open: true, id: itemId, title });
+  };
+
+  // perform confirmed delete (calls existing deleteItineraryItem helper)
+  const confirmDeleteItineraryConfirmed = async () => {
+    const id = confirmItin.id;
+    setConfirmItin({ open: false, id: null, title: null });
+    if (!id) return;
+    try {
+      await deleteItineraryItem(id);
+    } catch (err) {
+      console.error("confirmed delete failed", err);
+      setToast({ msg: "Failed to delete item", type: "warning" });
+      setTimeout(() => setToast(null), 2000);
+    }
+  };
+
+  // addItinerary: used by modal "Add"
+  const addItinerary = async (item) => {
+    // optimistic update local state (append item at end)
+    setItinerary((prev) => {
+      const arr = [...(Array.isArray(prev) ? prev : [])];
+      arr.push(item);
+      return arr;
+    });
+
+    // Try to persist if we have a selectedTrip and we own it
+    const tripId = selectedTrip?.trip_id || selectedTripId;
+    const isOwner = user && (selectedTrip?.ownerId === user.uid || selectedTrip?.owner_id === user.uid);
+    if (useFirebase && db && tripId && isOwner) {
+      try {
+        // take current stored itinerary as base (fallback to local state)
+        const base = Array.isArray(selectedTrip?.itinerary) ? [...selectedTrip.itinerary] : Array.isArray(itinerary) ? [...itinerary] : [];
+        const newIt = [...base, item]; // append
+        const res = await saveItineraryForTrip(tripId, newIt);
+        if (res.ok) {
+          applyLocalEdit({ trip_id: tripId, itinerary: newIt, updatedAt: new Date().toISOString() });
+          setSelectedTrip((s) => s ? { ...s, itinerary: newIt } : s);
+          setItinerary(newIt);
+          setToast({ msg: "Itinerary saved", type: "success" });
+          setTimeout(() => setToast(null), 1400);
+          return;
+        } else {
+          setToast({ msg: "Saved locally (failed to sync)", type: "warning" });
+          setTimeout(() => setToast(null), 2200);
+          setSelectedTrip((s) => s ? { ...s, itinerary: newIt } : s);
+          setItinerary(newIt);
+          return;
+        }
+      } catch (err) {
+        console.error("addItinerary persist error", err);
+        setToast({ msg: "Saved locally (error persisting)", type: "warning" });
+        setTimeout(() => setToast(null), 2200);
+      }
+    } else {
+      // Not owner or no firebase => local only
+      setSelectedTrip((s) => s ? { ...s, itinerary: [...(s.itinerary || []), item] } : s);
+      setToast({ msg: "Added to local itinerary", type: "info" });
+      setTimeout(() => setToast(null), 1500);
+    }
+  };
+
+  // ---------- delete itinerary item ----------
+  const deleteItineraryItem = async (itemId) => {
+    if (!itemId) return;
+    // optimistic local update
+    setItinerary((prev) => (Array.isArray(prev) ? prev.filter((it) => it.id !== itemId) : prev));
+
+    const tripId = selectedTrip?.trip_id || selectedTripId;
+    const isOwner = user && (selectedTrip?.ownerId === user.uid || selectedTrip?.owner_id === user.uid);
+
+    if (useFirebase && db && tripId && isOwner) {
+      try {
+        // base from selectedTrip if available to avoid race with local state
+        const base = Array.isArray(selectedTrip?.itinerary) ? [...selectedTrip.itinerary] : (Array.isArray(itinerary) ? [...itinerary] : []);
+        const newIt = base.filter((it) => it.id !== itemId);
+        const res = await saveItineraryForTrip(tripId, newIt);
+        if (res.ok) {
+          applyLocalEdit({ trip_id: tripId, itinerary: newIt, updatedAt: new Date().toISOString() });
+          setSelectedTrip((s) => (s ? { ...s, itinerary: newIt } : s));
+          setItinerary(newIt);
+          setToast({ msg: "Itinerary item deleted", type: "success" });
+          setTimeout(() => setToast(null), 1400);
+          return;
+        } else {
+          // persist failed; keep local change but warn
+          setToast({ msg: "Deleted locally (failed to sync)", type: "warning" });
+          setTimeout(() => setToast(null), 2200);
+          setSelectedTrip((s) => (s ? { ...s, itinerary: newIt } : s));
+          setItinerary(newIt);
+          return;
+        }
+      } catch (err) {
+        console.error("deleteItineraryItem persist error", err);
+        setToast({ msg: "Deleted locally (error persisting)", type: "warning" });
+        setTimeout(() => setToast(null), 2200);
+      }
+    } else {
+      // local-only
+      setSelectedTrip((s) =>
+        s
+          ? { ...s, itinerary: (Array.isArray(s.itinerary) ? s.itinerary.filter((it) => it.id !== itemId) : []) }
+          : s
+      );
+      setToast({ msg: "Itinerary item removed (local only)", type: "info" });
+      setTimeout(() => setToast(null), 1200);
+    }
+  };
 
   async function deleteTripConfirm(id) {
     if (!id) return;
@@ -629,6 +875,66 @@ export default function Travel() {
       setSelectedTrip(null); // <- clear full selected trip too
     }
     setConfirmDelete({ open: false, id: null });
+  }
+
+  // save handler used by EditTripModal
+  async function handleSaveEdit(updatedFields) {
+    if (!tripToEdit || !tripToEdit.trip_id) return;
+    setSavingEdit(true);
+    try {
+      const merged = { ...tripToEdit, ...updatedFields };
+
+      // If media files were provided in the edit form, upload them first
+      if (Array.isArray(merged.media)) {
+        // detect items with .file and upload
+        const needUpload = merged.media.some((m) => m && m.file);
+        if (needUpload && useFirebase && user) {
+          merged.media = await uploadAndSaveMedia(merged.media, merged.trip_id);
+        }
+      }
+
+      // Persist to Firestore if configured and owner
+      const isOwner = user && (merged.ownerId === user.uid || merged.owner_id === user.uid);
+      if (useFirebase && user && isOwner) {
+        try {
+          // Only write the fields the UI cares about to avoid clobbering other server data.
+          const docRef = doc(db, "trips", merged.trip_id);
+          const payload = {
+            title: merged.title,
+            startDate: merged.start_date || merged.startDate || null,
+            endDate: merged.end_date || merged.endDate || null,
+            visibility: merged.visibility || (merged.private ? "private" : "public"),
+            itinerary: merged.itinerary || [],
+            media: merged.media || [],
+            notes: merged.notes || merged.notes || null,
+            destination: merged.destination || merged.dest || null,
+            startLocation: merged.startLocation || merged.start_location || null,
+            updatedAt: new Date().toISOString(),
+          };
+          // Clean undefined values
+          Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
+          await updateDoc(docRef, payload);
+          // optimistic local apply
+          applyLocalEdit({ trip_id: merged.trip_id, ...payload });
+        } catch (err) {
+          console.error("[Travel] save edit to Firestore failed:", err);
+          // still apply locally to avoid data loss
+          applyLocalEdit(merged);
+          setToast({ msg: "Saved locally (failed to sync)", type: "warning" });
+          setTimeout(() => setToast(null), 2000);
+        }
+      } else {
+        // local-only apply
+        applyLocalEdit(merged);
+      }
+
+      setShowEditModal(false);
+      setTripToEdit(null);
+      setToast({ msg: "Trip updated", type: "success" });
+      setTimeout(() => setToast(null), 1600);
+    } finally {
+      setSavingEdit(false);
+    }
   }
 
   const openEditModal = (t) => {
@@ -655,6 +961,8 @@ export default function Travel() {
       setTripStartLocation(merged.startLocation || merged.start_location || "");
       setTripDestination(merged.destination || merged.dest || "");
       setTripNotes(merged.notes || "");
+      // also sync internal itinerary state if provided
+      if (Array.isArray(merged.itinerary)) setItinerary(merged.itinerary);
     }
     setSavedTrips((prev) => prev.map((t) => (t.trip_id === updated.trip_id ? { ...t, ...updated } : t)));
   }
@@ -678,6 +986,7 @@ export default function Travel() {
       { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
     );
   };
+
   const stopTracking = () => {
     if (watchIdRef.current != null) {
       navigator.geolocation.clearWatch(watchIdRef.current);
@@ -697,6 +1006,7 @@ export default function Travel() {
     }));
     setMedia((m) => [...newItems, ...m]);
   };
+
   const removeMedia = (id) => setMedia((m) => m.filter((x) => x.id !== id));
   async function startBroadcast() {
     if (isBroadcasting) return;
@@ -730,27 +1040,71 @@ export default function Travel() {
       localVideoRef.current.srcObject = null;
     }
   }
-  async function startViewing() {
-    if (isViewing) return;
-    const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-    pcRef.current = pc;
-    pc.onicecandidate = () => { };
-    pc.ontrack = (ev) => {
-      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = ev.streams[0];
-    };
-    setIsViewing(true);
-  }
-  function stopViewing() {
-    setIsViewing(false);
-    if (pcRef.current) {
-      pcRef.current.close();
-      pcRef.current = null;
+  async function saveYouTubeToTrip() {
+    if (!selectedTrip || !selectedTrip.trip_id) {
+      setToast && setToast({ msg: "Select a trip first", type: "warning" });
+      setTimeout(() => setToast && setToast(null), 1400);
+      return;
     }
-    if (remoteVideoRef.current?.srcObject) {
-      remoteVideoRef.current.srcObject.getTracks().forEach((t) => t.stop());
-      remoteVideoRef.current.srcObject = null;
+
+    const id = extractYouTubeId(youtubeInput || selectedTrip.youtubeId || "");
+    if (!id) {
+      setToast && setToast({ msg: "Paste a valid YouTube watch/embed URL or iframe", type: "warning" });
+      setTimeout(() => setToast && setToast(null), 1800);
+      return;
+    }
+
+    setSavingYouTube(true);
+    try {
+      const isOwner = user && (selectedTrip.ownerId === user.uid || selectedTrip.owner_id === user.uid);
+
+      if (isOwner && useFirebase && db) {
+        try {
+          const dr = doc(db, "trips", selectedTrip.trip_id);
+          await updateDoc(dr, { youtubeId: id, updatedAt: new Date().toISOString() });
+          applyLocalEdit && applyLocalEdit({ trip_id: selectedTrip.trip_id, youtubeId: id, updated_at: new Date().toISOString() });
+          setToast && setToast({ msg: "YouTube link saved", type: "success" });
+          setTimeout(() => setToast && setToast(null), 1400);
+        } catch (err) {
+          console.error("saveYouTubeToTrip (firestore) failed:", err);
+          applyLocalEdit && applyLocalEdit({ trip_id: selectedTrip.trip_id, youtubeId: id });
+          setToast && setToast({ msg: "Saved locally (failed to sync)", type: "warning" });
+          setTimeout(() => setToast && setToast(null), 1800);
+        }
+      } else {
+        // local-only
+        applyLocalEdit && applyLocalEdit({ trip_id: selectedTrip.trip_id, youtubeId: id });
+        setToast && setToast({ msg: "Saved locally (not persisted)", type: "info" });
+        setTimeout(() => setToast && setToast(null), 1400);
+      }
+
+      // keep input synced to the saved id
+      setYoutubeInput(`https://www.youtube.com/watch?v=${id}`);
+    } finally {
+      setSavingYouTube(false);
     }
   }
+
+  function openYoutubeModal(prefill = "") {
+    // prefill input from selectedTrip or explicit prefill
+    if (prefill) setYoutubeInput(prefill);
+    else if (selectedTrip?.youtubeId) setYoutubeInput(`https://www.youtube.com/watch?v=${selectedTrip.youtubeId}`);
+    else setYoutubeInput("");
+    setShowYoutubeModal(true);
+  }
+
+  // ---------- permissions helper ----------
+  const canEditItinerary = useMemo(() => {
+    return Boolean(
+      // editing allowed if not in public view (local owner/editor)
+      !isPublicView ||
+      // or signed-in user is the resolved profile owner, or the selected trip owner
+      (user && (
+        (resolvedUid && user.uid === resolvedUid) ||
+        (selectedTrip && (selectedTrip.ownerId === user.uid || selectedTrip.owner_id === user.uid))
+      ))
+    );
+  }, [isPublicView, user, resolvedUid, selectedTrip]);
 
   /* ---------- UI helpers ---------- */
   const loadTrip = (t) => {
@@ -850,9 +1204,25 @@ export default function Travel() {
                 <button onClick={() => { /* saveTrip implementation */ }} className="btn-start">Save Trip Details</button>
               </>
             )}
+
             <button onClick={() => { /* exportTrips implementation */ }} className="btn-export">Export all</button>
             {isPublicView && <button onClick={() => { /* shareProfile implementation */ }} className="btn-start">Share profile</button>}
+
+
+            {/* Edit Trip button (owner-only) */}
+            {selectedTrip && user && (selectedTrip.ownerId === user.uid || selectedTrip.owner_id === user.uid) && (
+              <button
+                onClick={() => openEditModal(selectedTrip)}
+                className="btn-secondary"
+                title="Edit this trip"
+                style={{ marginLeft: 6 }}
+              >
+                Edit Trip
+              </button>
+            )}
           </div>
+
+
         </div>
       </header>
 
@@ -950,55 +1320,147 @@ export default function Travel() {
         {/* RIGHT PANEL: show only when owner OR a trip is selected for viewing */}
         {(!isPublicView || Boolean(selectedTripId)) ? (
           <main>
-            <div className="map-box section" style={{ height: 340 }}>
-              {position ? (
-                <MapContainer center={[position.lat, position.lng]} zoom={11} style={{ height: "100%", borderRadius: 8 }}>
-                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                  <Marker position={[position.lat, position.lng]}>
-                    <Popup>
-                      Current location<br />
-                      {position.lat.toFixed(5)}, {position.lng.toFixed(5)}
-                    </Popup>
-                  </Marker>
-                </MapContainer>
-              ) : (
-                <div className="muted" style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  No GPS fix yet — click "Start tracking"
-                </div>
-              )}
-            </div>
+            {/* Show Google embed if present on the selected trip, otherwise fall back to live map / message */}
+            {(selectedTrip && selectedTrip.googleEmbed) ? (
+              <GoogleEmbedMap embedHtmlOrUrl={selectedTrip.googleEmbed} height={340} />
+            ) : (
+              <div className="map-box section" style={{ height: 340, position: "relative", cursor: "default" }}>
+                {position ? (
+                  <MapContainer center={[position.lat, position.lng]} zoom={11} style={{ height: "100%", borderRadius: 8 }}>
+                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                    <Marker position={[position.lat, position.lng]}>
+                      <Popup>
+                        Current location<br />
+                        {position.lat.toFixed(5)}, {position.lng.toFixed(5)}
+                      </Popup>
+                    </Marker>
+                  </MapContainer>
+                ) : (
+                  // clickable overlay when there's no GPS fix
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => {
+                      // open modal to paste Google map embed (only if a trip is selected)
+                      if (!selectedTrip) {
+                        setToast({ msg: "Select or create a trip first", type: "warning" });
+                        setTimeout(() => setToast(null), 2000);
+                        return;
+                      }
+                      // prefill input with any existing embed
+                      setGoogleEmbedInput(selectedTrip?.googleEmbed || "");
+                      setShowEmbedModal(true);
+                    }}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.target.click(); } }}
+                    style={{
+                      height: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexDirection: "column",
+                      gap: 10,
+                      padding: 16,
+                      textAlign: "center",
+                      borderRadius: 8,
+                      cursor: "pointer",
+                      userSelect: "none"
+                    }}
+                    title="Click to add a Google map for this trip"
+                    aria-label="Add Google map embed for this trip"
+                  >
+                    <div className="muted" style={{ fontSize: 15 }}>
+                      No GPS fix yet — click "Start tracking"
+                    </div>
+
+                    <div style={{ fontSize: 13, color: "#666", maxWidth: 420 }}>
+                      Want to show a custom map instead? Click here to paste a Google Maps / My Maps embed URL or iframe.
+                    </div>
+
+                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setShowEmbedModal(true); setGoogleEmbedInput(selectedTrip?.googleEmbed || ""); }}
+                        className="btn-start"
+                        aria-label="Open map embed dialog"
+                      >
+                        Add / Paste Google map
+                      </button>
+
+                      {/* small inline hint for owners */}
+                      {selectedTrip && (!isPublicView || (user && (selectedTrip.ownerId === user.uid || selectedTrip.owner_id === user.uid))) && (
+                        <div style={{ alignSelf: "center", fontSize: 13, color: "#666" }}>Owners can save a map for this trip</div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
 
             <div style={{ display: "flex", gap: 20, marginTop: 18, flexWrap: "wrap" }}>
               <div style={{ flex: 2, minWidth: 320 }}>
+                {/* Merged Live / View UI (replace old Live Stream block with this) */}
+                {/* Simplified Live Video block: single video area or message */}
+                {/* Simplified Live Video block with owner button */}
                 <section className="section">
-                  <h2>Live Stream</h2>
-                  <div style={{ display: "flex", gap: 12 }}>
-                    <div style={{ width: 180 }}>
-                      <video ref={localVideoRef} autoPlay muted playsInline className="media-preview" />
-                      <div style={{ marginTop: 8 }}>
-                        {!isBroadcasting ? (
-                          !isPublicView && <button onClick={startBroadcast} className="btn-start">Start Broadcast</button>
-                        ) : (
-                          <button onClick={stopBroadcast} className="btn-stop">Stop Broadcast</button>
-                        )}
-                      </div>
-                    </div>
+                  <h2>Live Video</h2>
 
-                    <div style={{ flex: 1 }}>
-                      <video ref={remoteVideoRef} autoPlay playsInline className="media-preview" />
-                      <div style={{ marginTop: 8 }}>
-                        {!isViewing ? (
-                          <button onClick={startViewing} className="btn-start">View Live</button>
-                        ) : (
-                          <button onClick={stopViewing} className="btn-stop">Stop Viewing</button>
-                        )}
+                  <div style={{ marginTop: 12 }}>
+                    {selectedTrip?.youtubeId ? (
+                      <div style={{ height: 340 }}>
+                        <iframe
+                          title="YouTube Live"
+                          src={`https://www.youtube.com/embed/${selectedTrip.youtubeId}?autoplay=1`}
+                          width="100%"
+                          height="100%"
+                          style={{ border: 0 }}
+                          allowFullScreen
+                          loading="lazy"
+                        />
                       </div>
-                      <p className="muted" style={{ marginTop: 8, fontSize: 13 }}>
-                        Note: these are frontend placeholders. For many viewers you will need a signaling server and an SFU/RTMP media server.
-                      </p>
-                    </div>
+                    ) : (
+                      <div
+                        className="map-box section"
+                        style={{
+                          height: 340,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          textAlign: "center",
+                          padding: 16,
+                          cursor: isOwner ? "pointer" : "default",
+                          userSelect: "none",
+                        }}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => { if (isOwner) openYoutubeModal(selectedTrip?.youtubeId ? `https://www.youtube.com/watch?v=${selectedTrip.youtubeId}` : ""); }}
+                        onKeyDown={(e) => { if (isOwner && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openYoutubeModal(selectedTrip?.youtubeId ? `https://www.youtube.com/watch?v=${selectedTrip.youtubeId}` : ""); } }}
+                        aria-label="Attach YouTube live link"
+                        title={isOwner ? "Attach YouTube live link" : "No live feed attached"}
+                      >
+                        <div style={{ maxWidth: 480 }}>
+                          <div style={{ fontSize: 16 }} className="muted">No live feed attached</div>
+                          <div style={{ marginTop: 8, color: "#666" }}>
+                            {isOwner ? "Attach a YouTube watch URL or iframe to this trip to show a live stream." : "Owner hasn't attached a live stream yet."}
+                          </div>
+
+                          {isOwner && (
+                            <div style={{ marginTop: 14 }}>
+                              <button
+                                className="btn-start"
+                                onClick={(e) => { e.stopPropagation(); openYoutubeModal(selectedTrip?.youtubeId ? `https://www.youtube.com/watch?v=${selectedTrip.youtubeId}` : ""); }}
+                              >
+                                Attach YouTube link
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </section>
+
+
+
 
                 <section className="section">
                   <h2>Gallery (Photos & Videos)</h2>
@@ -1021,18 +1483,62 @@ export default function Travel() {
                 <div className="section">
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <h3>Itinerary</h3>
-                    {!isPublicView && <button onClick={() => setShowItineraryModal(true)} className="btn-start" style={{ fontSize: "14px", padding: "4px 10px" }}>Add</button>}
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      {canEditItinerary && (
+                        <button
+                          onClick={() => setShowItineraryModal(true)}
+                          className="btn-start"
+                          style={{ fontSize: "14px", padding: "4px 10px" }}
+                        >
+                          Add
+                        </button>
+                      )}
+                    </div>
                   </div>
+
 
                   <ul className="itinerary" style={{ marginTop: 12 }}>
                     {itinerary.length === 0 && <li className="muted">No itinerary items yet.</li>}
                     {itinerary.map((it, idx) => (
-                      <li key={idx}>
-                        <div className="place">Day {it.day || idx + 1}: {it.route || it.place}</div>
-                        {it.distance && <div className="date">{it.distance}</div>}
-                        {it.notes && <div className="notes">{it.notes}</div>}
+                      <li
+                        key={it.id || idx}
+                        style={{
+                          marginBottom: 8,
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "flex-start",
+                          gap: 8,
+                        }}
+                      >
+                        <div style={{ flex: 1 }}>
+                          <div className="place">Day {it.day || idx + 1}: {it.route || it.place}</div>
+                          {it.distance && <div className="date">{it.distance}</div>}
+                          {it.notes && <div className="notes">{it.notes}</div>}
+                        </div>
+
+                        {canEditItinerary && (
+                          <div style={{ marginLeft: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); confirmDeleteItinerary(it.id || null, it.route || `Day ${idx + 1}`); }}
+                              className="btn-icon"
+                              title="Delete itinerary item"
+                              aria-label="Delete itinerary item"
+                            >
+                              {/* trash icon SVG (16x16) */}
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+                                <path d="M3 6h18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                <path d="M10 11v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                <path d="M14 11v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            </button>
+
+                          </div>
+                        )}
                       </li>
                     ))}
+
                   </ul>
                 </div>
               </aside>
@@ -1073,8 +1579,75 @@ export default function Travel() {
       </div>
 
       {showItineraryModal && (
-        <Modal title="Add Itinerary" onClose={() => setShowItineraryModal(false)}>
-          <AddItineraryForm onAdd={(item) => { addItinerary(item); setShowItineraryModal(false); }} onCancel={() => setShowItineraryModal(false)} />
+        // show trip title in modal header for clarity (fallback to selectedTrip.title or tripTitle)
+        <Modal title={`Add Itinerary — ${selectedTrip?.title || tripTitle || "Untitled Trip"}`} onClose={() => setShowItineraryModal(false)}>
+          <AddItineraryForm
+            tripTitle={selectedTrip?.title || tripTitle || "Untitled Trip"}
+            onAdd={(item) => { addItinerary(item); setShowItineraryModal(false); }}
+            onCancel={() => setShowItineraryModal(false)}
+          />
+        </Modal>
+      )}
+
+      {/* Edit trip modal (owner only) */}
+      {showEditModal && tripToEdit && (
+        <EditTripModal
+          trip={tripToEdit}
+          open={showEditModal}
+          saving={savingEdit}
+          onCancel={() => {
+            setShowEditModal(false);
+            setTripToEdit(null);
+          }}
+          onSave={handleSaveEdit}
+        />
+      )}
+
+      {/* Google Embed Modal (open when user clicks the no-gps area or Save map in header) */}
+      {showEmbedModal && (
+        <Modal title={`Add Google Map — ${selectedTrip?.title || "Trip"}`} onClose={() => setShowEmbedModal(false)}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 320 }}>
+            <div style={{ fontSize: 13, color: "#555" }}>Paste the iframe HTML or the embed URL from Google My Maps / Google Maps:</div>
+            <input
+              placeholder={`Paste iframe or src URL (e.g. <iframe src="..."> or https://www.google.com/maps/d/.../embed)`}
+              value={googleEmbedInput}
+              onChange={(e) => setGoogleEmbedInput(e.target.value)}
+              style={{ width: "100%", padding: "8px 10px", fontSize: 14 }}
+            />
+
+            {/* preview area if the input yields a src */}
+            {extractEmbedSrc(googleEmbedInput) ? (
+              <div style={{ border: "1px solid #eee", borderRadius: 6, overflow: "hidden", height: 200 }}>
+                <iframe
+                  title="Map preview"
+                  src={extractEmbedSrc(googleEmbedInput)}
+                  width="100%"
+                  height="100%"
+                  style={{ border: 0 }}
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                />
+              </div>
+            ) : (
+              <div className="muted" style={{ fontSize: 13 }}>
+                Paste a Google My Maps embed iframe or a Google Maps embed URL to see a preview here.
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button className="btn-cancel" onClick={() => setShowEmbedModal(false)}>Cancel</button>
+              <button
+                className="btn-start"
+                onClick={async () => {
+                  // call your existing save helper
+                  await saveGoogleEmbedForSelectedTrip();
+                  setShowEmbedModal(false);
+                }}
+              >
+                Save map
+              </button>
+            </div>
+          </div>
         </Modal>
       )}
 
@@ -1087,12 +1660,90 @@ export default function Travel() {
           </div>
         </Modal>
       )}
+
+      {/* Confirm delete itinerary item modal */}
+      {confirmItin.open && (
+        <Modal title="Delete itinerary item?" onClose={() => setConfirmItin({ open: false, id: null, title: null })}>
+          <p>Are you sure you want to delete <strong>{confirmItin.title || "this item"}</strong> from the itinerary? This action cannot be undone.</p>
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <button className="btn-danger" onClick={confirmDeleteItineraryConfirmed}>Delete</button>
+            <button className="btn-cancel" onClick={() => setConfirmItin({ open: false, id: null, title: null })}>Cancel</button>
+          </div>
+        </Modal>
+      )}
+
+      {confirmRemoveYoutube && (
+        <Modal title="Remove YouTube link?" onClose={() => setConfirmRemoveYoutube(false)}>
+          <p>Are you sure you want to remove the attached YouTube live link from this trip?</p>
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <button
+              className="btn-danger"
+              onClick={() => {
+                clearYouTubeFromTrip(); // run your removal logic
+                setConfirmRemoveYoutube(false);
+              }}
+            >
+              Remove
+            </button>
+            <button className="btn-cancel" onClick={() => setConfirmRemoveYoutube(false)}>Cancel</button>
+          </div>
+        </Modal>
+      )}
+
+      {showYoutubeModal && (
+        <Modal title={`Attach YouTube Live — ${selectedTrip?.title || "Trip"}`} onClose={() => setShowYoutubeModal(false)}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 320 }}>
+            <div style={{ fontSize: 13, color: "#555" }}>Paste the YouTube watch URL (https://www.youtube.com/watch?v=...) or an iframe embed code:</div>
+            <input
+              placeholder={`Paste YouTube watch link or iframe (e.g. <iframe src="https://www.youtube.com/embed/..." />)`}
+              value={youtubeInput}
+              onChange={(e) => setYoutubeInput(e.target.value)}
+              style={{ width: "100%", padding: "8px 10px", fontSize: 14 }}
+            />
+
+            {/* preview if we can extract an id */}
+            {extractYouTubeId(youtubeInput) ? (
+              <div style={{ border: "1px solid #eee", borderRadius: 6, overflow: "hidden", height: 200 }}>
+                <iframe
+                  title="YouTube preview"
+                  src={`https://www.youtube.com/embed/${extractYouTubeId(youtubeInput)}?autoplay=1`}
+                  width="100%"
+                  height="100%"
+                  style={{ border: 0 }}
+                  loading="lazy"
+                  allowFullScreen
+                />
+              </div>
+            ) : (
+              <div className="muted" style={{ fontSize: 13 }}>
+                Paste a YouTube watch URL or iframe to see a preview here.
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button className="btn-cancel" onClick={() => setShowYoutubeModal(false)}>Cancel</button>
+              <button
+                className="btn-start"
+                onClick={async () => {
+                  await saveYouTubeToTrip();
+                  setShowYoutubeModal(false);
+                }}
+                disabled={savingYouTube}
+              >
+                {savingYouTube ? "Saving..." : "Save to trip"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+
     </div>
   );
 }
 
-/* ---------- AddItineraryForm (unchanged) ---------- */
-function AddItineraryForm({ onAdd, onCancel }) {
+/* ---------- AddItineraryForm (updated to show trip title) ---------- */
+function AddItineraryForm({ onAdd, onCancel, tripTitle }) {
   const [day, setDay] = useState("");
   const [route, setRoute] = useState("");
   const [distance, setDistance] = useState("");
@@ -1101,7 +1752,14 @@ function AddItineraryForm({ onAdd, onCancel }) {
   const submit = (e) => {
     e.preventDefault();
     if (!route) return;
-    onAdd({ day: day || String(Date.now()).slice(-4), route, distance, notes, date: new Date().toISOString() });
+    onAdd({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      day: day || String(Date.now()).slice(-4),
+      route,
+      distance,
+      notes,
+      date: new Date().toISOString(),
+    });
     setDay("");
     setRoute("");
     setDistance("");
@@ -1109,15 +1767,23 @@ function AddItineraryForm({ onAdd, onCancel }) {
   };
 
   return (
-    <form onSubmit={submit} className="itinerary-form">
-      <input placeholder="Day Number" value={day} onChange={(e) => setDay(e.target.value)} />
-      <input placeholder="Route (e.g., Raipur → Delhi)" value={route} onChange={(e) => setRoute(e.target.value)} />
-      <input placeholder="Distance (e.g., 1,220 km)" value={distance} onChange={(e) => setDistance(e.target.value)} />
-      <textarea placeholder="Notes (stops, sightseeing, etc.)" value={notes} onChange={(e) => setNotes(e.target.value)} />
-      <div className="modal-actions">
-        <button type="button" className="btn-cancel" onClick={onCancel}>Cancel</button>
-        <button type="submit" className="btn-save">Save</button>
+    <div>
+      {/* Visible trip title inside modal so user knows which trip they're editing */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 13, color: "#555", marginBottom: 4 }}>Adding itinerary for</div>
+        <div style={{ fontSize: 16, fontWeight: 600 }}>{tripTitle}</div>
       </div>
-    </form>
+
+      <form onSubmit={submit} className="itinerary-form">
+        <input placeholder="Day Number" value={day} onChange={(e) => setDay(e.target.value)} />
+        <input placeholder="Route (e.g., Raipur → Delhi)" value={route} onChange={(e) => setRoute(e.target.value)} />
+        <input placeholder="Distance (e.g., 1,220 km)" value={distance} onChange={(e) => setDistance(e.target.value)} />
+        <textarea placeholder="Notes (stops, sightseeing, etc.)" value={notes} onChange={(e) => setNotes(e.target.value)} />
+        <div className="modal-actions">
+          <button type="button" className="btn-cancel" onClick={onCancel}>Cancel</button>
+          <button type="submit" className="btn-save">Save</button>
+        </div>
+      </form>
+    </div>
   );
 }

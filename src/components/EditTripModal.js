@@ -228,13 +228,13 @@ export default function EditTripModal({
             try {
                 const key = "eric";
                 const s1 = await getDoc(doc(db, "handles", key));
-                console.log("doc handles/eric exists:", !!(s1 && typeof s1.exists === "function" ? s1.exists() : s1.exists), s1 && s1.data ? s1.data() : null);
+                // console.log("doc handles/eric exists:", !!(s1 && typeof s1.exists === "function" ? s1.exists() : s1.exists), s1 && s1.data ? s1.data() : null);
 
                 const snaps = await getDocs(query(collection(db, "handles"), where("handle", "==", key)));
-                console.log("query handles where handle == eric count:", snaps.size, snaps.docs.map(d => ({ id: d.id, data: d.data() })));
+                // console.log("query handles where handle == eric count:", snaps.size, snaps.docs.map(d => ({ id: d.id, data: d.data() })));
 
                 const u = await getDocs(query(collection(db, "users"), where("handle", "==", key)));
-                console.log("query users where handle == eric count:", u.size, u.docs.map(d => ({ id: d.id, data: d.data() })));
+                // console.log("query users where handle == eric count:", u.size, u.docs.map(d => ({ id: d.id, data: d.data() })));
             } catch (err) {
                 console.error("debug handle lookup error:", err);
             }

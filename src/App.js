@@ -120,6 +120,14 @@ function App() {
       setFavicon("/favicon-light32.png");
     }
   }, [currentUser, theme]);
+
+  useEffect(() => {
+    const onOpenFromAnywhere = () => setShowAddTripModal(true);
+    window.addEventListener("jift:openAddTrip", onOpenFromAnywhere);
+    return () => window.removeEventListener("jift:openAddTrip", onOpenFromAnywhere);
+  }, []);
+
+
   const createTripCallable = React.useMemo(() => {
     return createTripCallableFactory({ auth, apiBase: API_BASE });
   }, [API_BASE]);
@@ -127,7 +135,16 @@ function App() {
   const openAuth = (mode) => setAuthMode(mode);
   const closeAuth = () => setAuthMode(null);
 
-  const openAddTrip = () => setShowAddTripModal(true);
+  // inside App()
+  const openAddTrip = () => {
+    // If user not signed in, open auth modal instead of AddTrip.
+    if (!currentUser?.uid) {
+      setAuthMode("login");
+      return;
+    }
+    setShowAddTripModal(true);
+  };
+
   const closeAddTrip = () => {
     setShowAddTripModal(false);
     setSaveError(null);

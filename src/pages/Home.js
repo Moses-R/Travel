@@ -1,10 +1,12 @@
 // src/pages/Home.jsx
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect, Suspense } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import AuthModal from "../components/AuthModal";
 import "./css/Home.css";
 
+// Lazy placeholder: we'll load AddTripModal dynamically when needed.
+// Note: we still use dynamic import manually so we can support both default or named exports.
 function Skeleton({ height = 44 }) {
   return <div className="skel" style={{ height, borderRadius: 8 }} aria-hidden="true" />;
 }
@@ -92,6 +94,12 @@ export default function HomePage() {
   const [toastMsg, setToastMsg] = useState("");
   const [authOpen, setAuthOpen] = useState(false);
 
+  // Add-trip modal handling:
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [AddModalComp, setAddModalComp] = useState(null);
+
+  // Attempt to load previously imported modal if you preloaded it elsewhere.
+  // filtered users
   const filteredUsers = useMemo(() => {
     if (!query) return users;
     const q = query.toLowerCase();
@@ -102,21 +110,125 @@ export default function HomePage() {
     );
   }, [users, query]);
 
-  // TODO: Later replace this with Firestore queries (fetch users/featured from Firebase)
-  // Example: useEffect(() => { loadFromFirestore(); }, []);
+  // Replace existing openAddTripModal and the window.addEventListener('jift:openAddTrip', ...) useEffect
+  // in src/pages/Home.jsx with this version:
 
-  // --- Handlers for auth / CTA behavior ---
-  const handleAddTripClick = (e) => {
-    if (currentUser) {
-      navigate("/trips/new");
+  // Handler for opening add-trip that tries dynamic import first, otherwise dispatches fallback.
+  const openAddTripModal = async () => {
+    if (!currentUser) {
+      setToastMsg("Please log in or sign up to add a trip.");
       return;
     }
-    setToastMsg("Please log in or sign up to add a trip.");
+
+    // Always notify app-level listener first so central TripModal (in App.js) will open.
+    // This avoids relying on dynamic import success for the modal to appear.
+    window.dispatchEvent(new CustomEvent("jift:openAddTrip"));
+
+    // Try to dynamically import TripModal so Home can open an inline one if desired.
+    // But don't *require* it — even if import fails, app-level modal will already open.
+    try {
+      const imported = await import("../components/TripModal");
+      const Comp = imported.default || imported.TripModal || imported;
+      if (Comp) {
+        // If we successfully imported, cache the component and open an inline modal (optional UX).
+        setAddModalComp(() => Comp);
+        setAddModalOpen(true);
+      } else {
+        console.warn("[Home] dynamic import succeeded but component not found/exported as default.");
+      }
+    } catch (err) {
+      // Import failing is non-fatal now — central modal is already triggered.
+      console.warn("[Home] dynamic import('../components/TripModal') failed:", err);
+    }
   };
+
+  // Replace the existing useEffect that listens for "jift:openAddTrip" with this:
+  // It will attempt to load TripModal into Home (nice-to-have), but if it can't, it
+  // will show a toast so developers/users know why nothing inline opened.
+  useEffect(() => {
+    const onOpen = async (e) => {
+      // If we already loaded component, just open it
+      if (AddModalComp) {
+        setAddModalOpen(true);
+        return;
+      }
+
+      // Only attempt inline import for convenience — central App listener is the real source of truth.
+      try {
+        const imported = await import("../components/TripModal");
+        const Comp = imported.default || imported.TripModal || imported;
+        if (Comp) {
+          setAddModalComp(() => Comp);
+          setAddModalOpen(true);
+          return;
+        }
+      } catch (err) {
+        // If import fails, we still rely on App.js central TripModal to open.
+        // Show a small toast to indicate inline modal unavailable.
+        console.warn("[Home] import TripModal failed in response to jift:openAddTrip:", err);
+        setToastMsg("Add Trip modal will open from the main app. If nothing happens, check console for errors.");
+      }
+    };
+
+    window.addEventListener("jift:openAddTrip", onOpen);
+    return () => window.removeEventListener("jift:openAddTrip", onOpen);
+  }, [AddModalComp]);
+
+
+  // If user clicks button inside Home page
+  const handleAddTripClick = (e) => {
+    if (!currentUser) {
+      setToastMsg("Please log in or sign up to add a trip.");
+      return;
+    }
+    // Try to open modal by loading TripModal locally (falls back to event only if import fails)
+    openAddTripModal();
+  };
+
 
   const handleCreateProfileClick = () => {
     setAuthOpen(true);
   };
+
+  // Listen for global open event (so Navbar dispatch will open modal in Home)
+  // Replace the existing useEffect that listens for "jift:openAddTrip" with this:
+  useEffect(() => {
+    const onOpen = async (e) => {
+      // If already loaded component, just open it
+      if (AddModalComp) {
+        setAddModalOpen(true);
+        return;
+      }
+
+      // Try to load the real TripModal (your actual file)
+      try {
+        const imported = await import("../components/TripModal");
+        const Comp = imported.default || imported.TripModal || imported;
+        if (Comp) {
+          setAddModalComp(() => Comp);
+          setAddModalOpen(true);
+          return;
+        }
+      } catch (err) {
+        // import failed — continue to fallback below
+        // console.warn("[Home] import TripModal failed", err);
+      }
+
+      // Final UI feedback if nothing opened
+      setToastMsg("Add Trip modal unavailable here — ensure TripModal exists or open it from the navbar.");
+    };
+
+    window.addEventListener("jift:openAddTrip", onOpen);
+    return () => window.removeEventListener("jift:openAddTrip", onOpen);
+  }, [AddModalComp]);
+
+  // Auto-clear toasts on route change (optional nicer UX)
+  useEffect(() => {
+    return () => {
+      setToastMsg("");
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigate]);
 
   return (
     <div className="hp-container">
@@ -333,6 +445,19 @@ export default function HomePage() {
 
       {/* Auth modal */}
       {authOpen && <AuthModal onClose={() => setAuthOpen(false)} />}
+
+      {/* AddTrip modal (if dynamically loaded) */}
+      {addModalOpen && AddModalComp && (
+        <Suspense fallback={null}>
+          <AddModalComp
+            onClose={() => {
+              setAddModalOpen(false);
+              // optionally clear the loaded component if you want to free memory:
+              // setAddModalComp(null);
+            }}
+          />
+        </Suspense>
+      )}
 
       {/* Toast */}
       <Toast message={toastMsg} onClose={() => setToastMsg("")} />

@@ -458,6 +458,7 @@ export default function TripModal({
             </label>
             <input
               ref={titleRef}
+              className="modal-input"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               required
@@ -473,6 +474,7 @@ export default function TripModal({
                 Start location <span aria-hidden style={{ color: "var(--danger)" }}>*</span>
               </label>
               <input
+                className="modal-input"
                 value={startLocation}
                 onChange={(e) => setStartLocation(e.target.value)}
                 placeholder="City or place"
@@ -527,6 +529,7 @@ export default function TripModal({
           <div style={{ marginTop: 10 }}>
             <label>Notes</label>
             <textarea
+              className="modal-input"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={4}

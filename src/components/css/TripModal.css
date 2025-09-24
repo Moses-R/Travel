@@ -1,48 +1,49 @@
-/* src/components/css/TripModal.css
-   Theme-aware styles for TripModal (and general modal controls)
-   Uses .light-theme and .dark-theme on a parent (e.g. <div className="light-theme">) */
+/* TripModal.css (replace or merge with existing; this is a drop-in improved stylesheet) */
 
 :root {
   --radius-md: 10px;
   --radius-sm: 6px;
   --transition-fast: 150ms ease;
-  --shadow-soft: 0 6px 20px rgba(0,0,0,0.12);
-  --shadow-strong: 0 10px 30px rgba(0,0,0,0.2);
-  --glass: rgba(255,255,255,0.04);
-}
+  --shadow-soft: 0 6px 20px rgba(0, 0, 0, 0.12);
+  --shadow-strong: 0 10px 30px rgba(0, 0, 0, 0.2);
+  --glass: rgba(255, 255, 255, 0.04);
 
-/* --- theme variables --- */
-.light-theme {
+  /* fallback/default theme values (light) */
   --bg: #ffffff;
   --panel-bg: #ffffff;
   --text: #111827;
   --muted: #6b7280;
-  --accent: #2563eb; /* blue-600 */
+  --accent: #2563eb;
   --accent-contrast: #ffffff;
   --btn-primary-bg: var(--accent);
   --btn-primary-text: var(--accent-contrast);
-  --btn-secondary-bg: #f3f4f6; /* gray-100 */
+  --btn-secondary-bg: #f3f4f6;
   --btn-secondary-text: #111827;
   --input-bg: #fff;
   --input-border: #e5e7eb;
-  --backdrop-bg: rgba(15, 23, 42, 0.45); /* slightly warm */
+  --input-placeholder: rgba(0, 0, 0, 0.35);
+  --backdrop-bg: rgba(15, 23, 42, 0.45);
   --danger: #dc2626;
 }
 
-.dark-theme {
+/* dark theme overrides (works when .dark-theme or body.dark-theme is present) */
+.dark-theme,
+body.dark-theme {
   --bg: #0b1220;
   --panel-bg: #0f1724;
   --text: #e6eef8;
   --muted: #9aa7bf;
-  --accent: #60a5fa; /* sky-400 for contrast in dark */
+  --accent: #60a5fa;
   --accent-contrast: #06233a;
+  /* careful: contrast color used for tiny text; we'll override primary button text below */
   --btn-primary-bg: var(--accent);
-  --btn-primary-text: var(--accent-contrast);
-  --btn-secondary-bg: rgba(255,255,255,0.06);
+  --btn-primary-text: #06233a;
+  --btn-secondary-bg: rgba(255, 255, 255, 0.06);
   --btn-secondary-text: #e6eef8;
   --input-bg: #071021;
-  --input-border: rgba(255,255,255,0.06);
-  --backdrop-bg: rgba(2,6,23,0.7);
+  --input-border: rgba(255, 255, 255, 0.08);
+  --input-placeholder: rgba(255, 255, 255, 0.22);
+  --backdrop-bg: rgba(2, 6, 23, 0.7);
   --danger: #f87171;
 }
 
@@ -64,22 +65,15 @@
 .modal {
   width: 520px;
   max-width: 100%;
-  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
   background-color: var(--panel-bg);
   color: var(--text);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-soft);
   padding: 20px;
   box-sizing: border-box;
-  border: 1px solid rgba(255,255,255,0.04);
+  border: 1px solid rgba(255, 255, 255, 0.04);
   transform-origin: center;
   transition: transform var(--transition-fast), box-shadow var(--transition-fast);
-}
-
-/* subtle elevation on open (if you animate) */
-.modal.open {
-  transform: translateY(-6px);
-  box-shadow: var(--shadow-strong);
 }
 
 /* header */
@@ -95,7 +89,7 @@
   display: block;
 }
 
-/* form fields */
+/* labels */
 .modal label {
   display: block;
   font-size: 13px;
@@ -103,9 +97,9 @@
   margin-bottom: 6px;
 }
 
-.modal input[type="text"],
-.modal input[type="date"],
-.modal input[type="email"],
+/* unified input style via class .modal-input */
+.modal-input,
+.modal input,
 .modal textarea,
 .modal select {
   width: 100%;
@@ -117,31 +111,35 @@
   border-radius: var(--radius-sm);
   box-sizing: border-box;
   outline: none;
-  transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
+  -webkit-appearance: none;
+  appearance: none;
 }
 
+/* placeholder color uses variable */
+.modal-input::placeholder,
 .modal input::placeholder,
 .modal textarea::placeholder {
-  color: rgba(0,0,0,0.35);
+  color: var(--input-placeholder);
 }
 
-.dark-theme .modal input::placeholder,
-.dark-theme .modal textarea::placeholder {
-  color: rgba(255,255,255,0.18);
-}
-
+/* subtle shadow and border on focus for keyboard users */
+.modal-input:focus,
 .modal input:focus,
 .modal textarea:focus,
 .modal select:focus {
-  box-shadow: 0 4px 18px rgba(37,99,235,0.12);
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.10);
   border-color: var(--accent);
+  transform: translateY(-1px);
 }
 
 /* textarea */
 .modal textarea {
-  min-height: 78px;
+  min-height: 96px;
   resize: vertical;
-  line-height: 1.4;
+  line-height: 1.5;
+  padding-top: 12px;
+  padding-bottom: 12px;
 }
 
 /* row helper */
@@ -152,12 +150,14 @@
 }
 
 /* column children flex */
-.modal .row > div {
+.modal .row>div {
   flex: 1;
 }
 
 /* small spacing helpers */
-.modal > * + * { margin-top: 10px; }
+.modal>*+* {
+  margin-top: 10px;
+}
 
 /* error message */
 .modal .error {
@@ -187,32 +187,38 @@
   user-select: none;
   transition: transform var(--transition-fast), box-shadow var(--transition-fast), opacity var(--transition-fast);
   border: 1px solid transparent;
+  min-height: 36px;
 }
 
-.btn:active { transform: translateY(1px); }
+.btn:active {
+  transform: translateY(1px);
+}
 
 /* primary */
 .btn-primary {
   background: var(--btn-primary-bg);
   color: var(--btn-primary-text);
   border-color: transparent;
-  box-shadow: 0 6px 18px rgba(37,99,235,0.12);
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.12);
 }
 
-.btn-primary:hover {
-  filter: brightness(0.98);
-  box-shadow: 0 10px 24px rgba(37,99,235,0.14);
+/* ensure contrast on primary button text in dark mode */
+.dark-theme .btn-primary,
+body.dark-theme .btn-primary {
+  color: #06233a;
+  /* keep as chosen accent contrast or change to #001226 if you prefer darker */
 }
 
 /* secondary */
 .btn-secondary {
   background: var(--btn-secondary-bg);
   color: var(--btn-secondary-text);
-  border: 1px solid rgba(0,0,0,0.04);
+  border: 1px solid rgba(0, 0, 0, 0.04);
 }
 
-.dark-theme .btn-secondary {
-  border: 1px solid rgba(255,255,255,0.04);
+.dark-theme .btn-secondary,
+body.dark-theme .btn-secondary {
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 /* disabled */
@@ -244,9 +250,18 @@
   gap: 8px;
 }
 
+/* muted helper */
 .modal .muted {
   color: var(--muted);
   font-size: 13px;
+}
+
+/* toast */
+.toast {
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  background: rgba(0, 0, 0, 0.04);
 }
 
 /* responsive */
@@ -257,14 +272,17 @@
     border-radius: 8px;
   }
 
-  .modal h3 { font-size: 16px; }
+  .modal h3 {
+    font-size: 16px;
+  }
 }
 
 /* Accessibility: focus outline for keyboard users */
 :focus {
   outline: none;
 }
+
 :focus-visible {
-  outline: 3px solid rgba(99,102,241,0.14);
+  outline: 3px solid rgba(99, 102, 241, 0.14);
   outline-offset: 2px;
 }

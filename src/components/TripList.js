@@ -187,7 +187,7 @@ export default function TripsList({
                         const active = activeCheck(t);
                         const scheduled = !active && isTripScheduled(t);
 
-                        console.log("TripList: trip", t.trip_id, "active:", active, "scheduled:", scheduled);
+                        // console.log("TripList: trip", t.trip_id, "active:", active, "scheduled:", scheduled);
                         return (
                             <li
                                 key={t.trip_id}

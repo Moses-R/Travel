@@ -1,0 +1,199 @@
+/* Core variables with sensible fallbacks.
+   App can override these on :root, html[data-theme="..."], or .dark/.light classes.
+*/
+:root {
+    --jift-bg: #ffffff;
+    --jift-border: #e6e9ef;
+    --jift-text: #111827;
+    --jift-muted: #6b7280;
+    --jift-accent: #0ea5a4;
+    --jift-link: var(--jift-muted);
+    --jift-link-hover-bg: rgba(0, 0, 0, 0.04);
+    --jift-focus-ring: 3px;
+    --jift-footer-padding-vertical: 12px;
+    --jift-footer-padding-horizontal: 16px;
+    --jift-footer-gap: 12px;
+    color-scheme: light;
+}
+
+/* Respect user preference for dark mode */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --jift-bg: #0b1220;
+        --jift-border: rgba(255, 255, 255, 0.06);
+        --jift-text: #e6eef6;
+        --jift-muted: #9ca3af;
+        --jift-link: var(--jift-muted);
+        --jift-link-hover-bg: rgba(255, 255, 255, 0.04);
+        color-scheme: dark;
+    }
+}
+
+/* If your app explicitly toggles a class or data attribute, prefer that.
+   Example: <html class="dark"> or <html data-theme="dark"> */
+.dark,
+html[data-theme="dark"],
+body[data-theme="dark"] {
+    --jift-bg: #0b1220;
+    --jift-border: rgba(255, 255, 255, 0.06);
+    --jift-text: #e6eef6;
+    --jift-muted: #9ca3af;
+    --jift-link-hover-bg: rgba(255, 255, 255, 0.04);
+    color-scheme: dark;
+}
+
+.light,
+html[data-theme="light"],
+body[data-theme="light"] {
+    --jift-bg: #ffffff;
+    --jift-border: #e6e9ef;
+    --jift-text: #111827;
+    --jift-muted: #6b7280;
+    --jift-link-hover-bg: rgba(0, 0, 0, 0.04);
+    color-scheme: light;
+}
+
+/* For forced-colors / high contrast windows */
+@media (forced-colors: active) {
+    :root {
+        --jift-bg: Canvas;
+        --jift-text: CanvasText;
+        --jift-border: GrayText;
+        --jift-muted: GrayText;
+        --jift-link: HighlightText;
+    }
+}
+
+/* Footer layout */
+.jift-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    background: var(--jift-bg) !important;
+    border-top: 1px solid var(--jift-border);
+
+    padding: var(--jift-footer-padding-vertical) var(--jift-footer-padding-horizontal);
+    gap: var(--jift-footer-gap);
+    font-size: 13px;
+    color: var(--jift-text);
+
+    /* allow browsers to choose readable form controls matching the theme */
+    color-scheme: var(--color-scheme, light dark);
+}
+
+/* left section (brand + tagline) */
+.jift-footer__left {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    min-width: 0;
+}
+
+.jift-footer__brand {
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+    color: var(--jift-text);
+}
+
+/* tagline uses muted color and will truncate on small screens */
+.jift-footer__tag {
+    color: var(--jift-muted);
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* right section (links + copyright) */
+.jift-footer__right {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    color: var(--jift-muted);
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    min-width: 0;
+}
+
+/* Links - use currentColor for icons if added, avoid hardcoded colors */
+.jift-footer__link {
+    color: var(--jift-link);
+    text-decoration: none;
+    padding: 6px 8px;
+    border-radius: 8px;
+    transition: background 120ms ease, color 120ms ease;
+    white-space: nowrap;
+    outline: none;
+    display: inline-flex;
+    align-items: center;
+}
+
+/* Hover / focus (works across light/dark using variables) */
+.jift-footer__link:hover,
+.jift-footer__link:focus {
+    background: var(--jift-link-hover-bg);
+    color: var(--jift-text);
+}
+
+/* Clear, visible keyboard focus (accessible) */
+.jift-footer__link:focus {
+    box-shadow: 0 0 0 var(--jift-focus-ring) rgba(14, 165, 164, 0.12);
+    border-radius: 8px;
+}
+
+/* Improve contrast when prefers-contrast: more */
+@media (prefers-contrast: more) {
+    .jift-footer__link {
+        font-weight: 600;
+    }
+
+    .jift-footer {
+        border-top-color: color-mix(in srgb, var(--jift-border) 40%, transparent);
+    }
+}
+
+/* small separator dot */
+.jift-footer__dot {
+    color: var(--jift-muted);
+    padding: 0 2px;
+}
+
+/* copyright text */
+.jift-footer__copy {
+    margin-left: 6px;
+    color: var(--jift-muted);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Reduce visual padding for very small viewports:
+   stack and center content so it doesn't feel cramped.
+*/
+@media (max-width: 640px) {
+    .jift-footer {
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        text-align: center;
+    }
+
+    .jift-footer__right {
+        justify-content: center;
+    }
+
+    .jift-footer__left,
+    .jift-footer__right {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .jift-footer__tag {
+        max-width: 240px;
+    }
+}
+
+/* Tiny utility: if you want the accent brand color on hover for the whole site,
+   override --jift-link in your page/theme to var(--jift-accent). */

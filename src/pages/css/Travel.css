@@ -385,3 +385,327 @@ textarea:focus {
   outline: 2px solid rgba(0, 0, 0, 0.12);
   outline-offset: 2px;
 }
+
+/* bike icon next to active trip title */
+.active-bike {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  margin-left: 6px;
+  /* subtle drop shadow to make it visible on light backgrounds */
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.12));
+}
+
+/* Active badge shown next to trip title in sidebar */
+.trip-active-badge {
+  background: #e8f8f5;
+  /* light mint background */
+  color: #007a5a;
+  /* dark green text */
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 7px;
+  border-radius: 999px;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.03);
+  white-space: nowrap;
+  display: inline-block;
+  margin-left: 4px;
+}
+
+/* Follow button styles */
+.btn-follow {
+  background: #007bff;
+  color: white;
+  border: none;
+  padding: 6px 10px;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: transform 0.12s ease, opacity 0.12s ease;
+}
+
+.btn-follow:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn-follow.following {
+  background: #e9f5ee;
+  color: #0a6b3a;
+  border: 1px solid rgba(10, 107, 58, 0.08);
+  box-shadow: none;
+}
+
+/* optional hover */
+.btn-follow:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+/* text-style follow button */
+.btn-text-follow {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--link-color, #0077b6);
+  text-decoration: underline;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-text-follow.following {
+  color: var(--accent-danger, #e63946);
+  text-decoration: none;
+}
+
+/* ensure button receives pointer events even if parent layers are present */
+.btn-text-follow,
+.btn-text-follow * {
+  pointer-events: auto;
+}
+
+.btn-text-follow:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn-icon {
+  background: none;
+  border: none;
+  padding: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: background 0.2s ease;
+  color: var(--text-color, #444);
+}
+
+.btn-icon:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+/* ---------- Responsive layout additions for Travel page ---------- */
+
+/* Responsive layout wrapper (desktop: sidebar + main) */
+.layout-grid {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 18px;
+  margin-top: 16px;
+  align-items: start;
+}
+
+/* sidebar adjustments */
+.layout-sidebar {
+  min-height: 320px;
+}
+
+/* main content container (keeps visual parity with previous inline styles) */
+.layout-main {
+  min-width: 0;
+}
+
+/* Reduce map height on small screens */
+.map-box {
+  height: 380px;
+  /* desktop default (already present) */
+}
+
+/* Better header wrapping for small screens */
+.travel-header {
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.travel-header h1 {
+  font-size: 2rem;
+  line-height: 1.05;
+  word-break: break-word;
+  max-width: 68%;
+}
+
+/* allow header right buttons to wrap below the title on narrow viewports */
+.travel-header>div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* smaller font for trip meta on mobile */
+.travel-header .muted {
+  font-size: 12px;
+}
+
+/* Make action buttons more touch-friendly on mobile */
+.travel-header button,
+.btn-start,
+.btn-stop,
+.btn-cancel {
+  min-height: 40px;
+  padding: 10px 14px;
+}
+
+/* compact gallery items on smaller viewports */
+.gallery-item img,
+.gallery-item video {
+  height: 120px;
+}
+
+/* Sidebar (TripsList) responsive: make it take full width on mobile */
+@media (max-width: 980px) {
+  .layout-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .layout-sidebar {
+    order: 0;
+    width: 100%;
+  }
+
+  .layout-main {
+    order: 1;
+    width: 100%;
+  }
+
+  /* shrink map height for smaller screens */
+  .map-box {
+    height: 300px;
+  }
+
+  .travel-header h1 {
+    font-size: 1.5rem;
+    max-width: 100%;
+  }
+}
+
+/* Narrower devices: increase stacking and reduce some paddings */
+@media (max-width: 720px) {
+  :root {
+    --radius-md: 10px;
+  }
+
+  .travel-container {
+    padding: 12px;
+  }
+
+  .map-box {
+    height: 260px;
+  }
+
+  .gallery-item img,
+  .gallery-item video {
+    height: 100px;
+  }
+
+  .itinerary li {
+    padding: 10px;
+  }
+
+  .btn-start,
+  .btn-stop {
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+
+  .travel-header>div:last-child {
+    justify-content: flex-end;
+  }
+}
+
+/* Small phones: collapse the header actions into a single menu-like button if space is tight */
+@media (max-width: 480px) {
+  .travel-header {
+    display: block;
+  }
+
+  .travel-header h1 {
+    margin-bottom: 8px;
+    font-size: 1.25rem;
+  }
+
+  /* hide less important buttons on very small screens (they remain available via Edit or menu) */
+  .travel-header button.btn-start:not(.always-show),
+  .travel-header button.btn-stop:not(.always-show),
+  .travel-header .btn-export {
+    display: inline-block;
+    /* keep essential ones visible; override elsewhere if needed */
+  }
+
+  .map-box {
+    height: 220px;
+  }
+
+  .gallery {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+}
+
+/* Improve touch focus visibility for a11y */
+button:focus,
+.saved-trip:focus {
+  outline: 3px solid rgba(4, 120, 87, 0.14);
+  outline-offset: 2px;
+}
+
+/* Make saved trip list items easier to tap on mobile: increase padding and touch area */
+.saved-trip {
+  padding: 12px;
+}
+
+/* Reduce side borders and shadows for a lighter mobile UI */
+@media (max-width: 720px) {
+  .section {
+    border: 1px solid rgba(0, 0, 0, 0.04);
+    box-shadow: none;
+  }
+}
+
+/* Optional: utility to force a button to always show on tiny screens.
+   Add class "always-show" to any button you want to keep visible even at 480px. */
+@media (max-width: 480px) {
+  .always-show {
+    display: inline-block !important;
+  }
+}
+
+.trip-scheduled-badge {
+  background: #fff7c2;
+  color: #7a5b00;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+}
+
+.active-dot {
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(1.4);
+    opacity: 0.6;
+  }
+
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}

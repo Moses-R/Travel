@@ -276,38 +276,38 @@ export default function HomePage() {
             <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
               {loading
                 ? Array.from({ length: 3 }).map((_, i) => (
-                    <li key={i}>
-                      <Skeleton height={44} />
-                    </li>
-                  ))
+                  <li key={i}>
+                    <Skeleton height={44} />
+                  </li>
+                ))
                 : users.slice(0, 5).map((u) => (
-                    <li
-                      key={u.id}
+                  <li
+                    key={u.id}
+                    style={{
+                      display: "flex",
+                      gap: 10,
+                      alignItems: "center",
+                      padding: "8px 0",
+                    }}
+                  >
+                    <img
+                      src={u.avatar || "/default-avatar.png"}
+                      alt=""
                       style={{
-                        display: "flex",
-                        gap: 10,
-                        alignItems: "center",
-                        padding: "8px 0",
+                        width: 40,
+                        height: 40,
+                        borderRadius: 8,
+                        objectFit: "cover",
                       }}
-                    >
-                      <img
-                        src={u.avatar || "/default-avatar.png"}
-                        alt=""
-                        style={{
-                          width: 40,
-                          height: 40,
-                          borderRadius: 8,
-                          objectFit: "cover",
-                        }}
-                      />
-                      <div>
-                        <Link to={`/users/${u.id}`} style={{ fontWeight: 600 }}>
-                          {u.name}
-                        </Link>
-                        <div style={{ color: "#6b7280", fontSize: 13 }}>{u.location}</div>
-                      </div>
-                    </li>
-                  ))}
+                    />
+                    <div>
+                      <Link to={`/users/${u.id}`} style={{ fontWeight: 600 }}>
+                        {u.name}
+                      </Link>
+                      <div style={{ color: "#6b7280", fontSize: 13 }}>{u.location}</div>
+                    </div>
+                  </li>
+                ))}
             </ul>
             <div style={{ textAlign: "center", marginTop: 8 }}>
               <Link to="/users" style={{ color: "var(--accent)", textDecoration: "none" }}>
@@ -330,10 +330,6 @@ export default function HomePage() {
           </div>
         </aside>
       </section>
-
-      <footer className="hp-footer">
-        © {new Date().getFullYear()} Jift · Built with ❤️ — privacy-first · creator-friendly
-      </footer>
 
       {/* Auth modal */}
       {authOpen && <AuthModal onClose={() => setAuthOpen(false)} />}

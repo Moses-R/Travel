@@ -1,14 +1,18 @@
 // src/pages/Travel.jsx
 import React, { useEffect, useRef, useState, useMemo } from "react";
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
 import "./css/Travel.css";
 import Modal from "../components/Modal";
 import EditTripModal from "../components/EditTripModal";
 import { useParams, useNavigate } from "react-router-dom";
 import { normalizeHandle } from "../utils/handle";
-import { updateDoc } from "firebase/firestore";
+import TripsList, { isTripActive, formatDateForUI, parseDateToMs, toMillis } from "../components/TripList";
+import MapPanel, { extractEmbedSrc } from "../components/MapPanel";
+import LiveVideoPanel from "../components/LiveVideoPanel";
+import ItineraryPanel, { AddItineraryForm } from "../components/ItineraryPanel";
+import GalleryPanel, { uploadAndSaveMedia } from "../components/GalleryPanel";
+import { safeShare } from "../utils/share";
+import LiveLocationPanel from '../components/LiveLocationPanel';
+
 import { onAuthStateChanged /* no auto-anon here */, getAuth } from "firebase/auth";
 import {
   collection,
@@ -20,20 +24,15 @@ import {
   deleteDoc,
   getDoc,
   getDocs,
+  arrayUnion,
+  arrayRemove,
+  updateDoc,
+  setDoc,
+  serverTimestamp
 } from "firebase/firestore";
-import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
+import bikeGif from "../assets/bike-running.gif";
 
 import { firebaseApp, auth, db, storage, isFirebaseConfigured } from "../firebase";
-
-/* ---------- leaflet icon fix ---------- */
-try {
-  delete L.Icon.Default.prototype._getIconUrl;
-  L.Icon.Default.mergeOptions({
-    iconRetinaUrl: require("leaflet/dist/images/marker-icon-2x.png"),
-    iconUrl: require("leaflet/dist/images/marker-icon.png"),
-    shadowUrl: require("leaflet/dist/images/marker-shadow.png"),
-  });
-} catch (e) { }
 
 /* ---------- firebase usage flag ---------- */
 const useFirebase = Boolean(isFirebaseConfigured && firebaseApp && auth && db && storage);
@@ -48,70 +47,104 @@ function normalizeDate(d) {
   if (isNaN(dt.getTime())) return null;
   return dt.toISOString().slice(0, 10);
 }
-
-async function uploadFileToStorage(userId, tripId, file) {
-  if (!useFirebase || !storage) throw new Error("Firebase storage not initialized");
-  const key = `${userId}/trips/${tripId}/${Date.now()}_${file.name}`;
-  const ref = storageRef(storage, key);
-  const snapshot = await uploadBytes(ref, file);
-  const url = await getDownloadURL(snapshot.ref);
-  return url;
+function slugify(text = "") {
+  return String(text || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[\s_]+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
 }
+// Resolve a handle (without @) -> uid using the handles collection (normalized)
+const resolveHandleToUidLocal = async (handleNoAt) => {
+  try {
+    if (!db || !handleNoAt) return null;
+    const key = normalizeHandle(String(handleNoAt || ""));
+    if (!key) return null;
 
-// GoogleEmbedMap: renders either an iframe src URL or a full iframe HTML string.
-function GoogleEmbedMap({ embedHtmlOrUrl, height = 340 }) {
-  if (!embedHtmlOrUrl) {
-    return (
-      <div className="map-box section" style={{ height }}>
-        <div className="muted" style={{
-          height: "100%", display: "flex", alignItems: "center", justifyContent: "center"
-        }}>
-          No Google map embed provided.
-        </div>
-      </div>
-    );
+    // preferred: doc id on `handles`
+    const hSnap = await getDoc(doc(db, "handles", key));
+    if (hSnap && typeof hSnap.exists === "function" ? hSnap.exists() : !!hSnap.exists) {
+      const d = hSnap.data();
+      return d?.uid ?? d?.userId ?? d?.id ?? null;
+    }
+
+    // fallback: handles collection might store handle as a field
+    const q = query(collection(db, "handles"), where("handle", "==", key));
+    const snaps = await getDocs(q);
+    if (snaps && !snaps.empty) {
+      const d = snaps.docs[0].data();
+      return d?.uid ?? d?.userId ?? d?.id ?? null;
+    }
+
+    // fallback: users collection may have the handle
+    const q2 = query(collection(db, "users"), where("handle", "==", key), orderBy("createdAt", "desc"));
+    const snaps2 = await getDocs(q2);
+    if (snaps2 && !snaps2.empty) {
+      const d = snaps2.docs[0].data();
+      return d?.uid ?? d?.id ?? snaps2.docs[0].id ?? null;
+    }
+    return null;
+  } catch (err) {
+    console.error("resolveHandleToUidLocal error:", err);
+    return null;
   }
+};
 
-  // Accept either full <iframe ...> HTML or a raw src URL
-  const srcMatch = String(embedHtmlOrUrl).match(/src=["']([^"']+)["']/);
-  const src = srcMatch ? srcMatch[1] : embedHtmlOrUrl;
+// Resolve UID -> handle (prefer doc id in handles collection where uid == <uid>)
+const resolveUidToHandleLocal = async (uid) => {
+  try {
+    if (!db || !uid) return null;
 
-  return (
-    <div className="map-box section" style={{ height, overflow: "hidden", borderRadius: 8 }}>
-      <iframe
-        title="Custom Google Map"
-        src={src}
-        width="100%"
-        height="100%"
-        style={{ border: 0 }}
-        loading="lazy"
-        referrerPolicy="no-referrer-when-downgrade"
-        allowFullScreen
-      />
-    </div>
-  );
-}
+    // query handles where uid == uid
+    const q = query(collection(db, "handles"), where("uid", "==", uid));
+    const snaps = await getDocs(q);
+    if (snaps && !snaps.empty) {
+      // prefer doc id (common pattern: doc id = handle)
+      const first = snaps.docs[0];
+      if (first && first.id) return first.id;
+      const d = first.data();
+      return d?.handle ?? d?.name ?? null;
+    }
+
+    // fallback: users doc with id==uid might contain handle
+    const uSnap = await getDoc(doc(db, "users", uid));
+    if (uSnap && typeof uSnap.exists === "function" ? uSnap.exists() : !!uSnap.exists) {
+      const data = uSnap.data();
+      return data?.handle ?? data?.username ?? null;
+    }
+
+    // fallback: users where uid field equals uid
+    const q2 = query(collection(db, "users"), where("uid", "==", uid));
+    const snaps2 = await getDocs(q2);
+    if (snaps2 && !snaps2.empty) {
+      const d = snaps2.docs[0].data();
+      return d?.handle ?? d?.username ?? null;
+    }
+
+    return null;
+  } catch (err) {
+    console.error("resolveUidToHandleLocal error:", err);
+    return null;
+  }
+};
+
 
 /* ---------- component ---------- */
-export default function Travel() {
-  const params = useParams();
+export default function Travel({ externalHandle = null, externalSlug = null }) {
   const navigate = useNavigate();
-
+  const params = useParams();
   let routeHandle = (params.handle || "").toString();
 
-  useEffect(() => {
-    // // // console.debug("[Travel] pathname:", window.location.pathname, "search:", window.location.search, "hash:", window.location.hash);
-  }, []);
-
-  if (!routeHandle) {
-    try {
-      const m = window.location.pathname.match(/@([^\/\?#]+)/);
-      if (m && m[1]) {
-        routeHandle = m[1];
-        // // // console.debug("[Travel] extracted handle from pathname fallback:", routeHandle);
-      }
-    } catch (e) { }
+  // prefer externalHandle prop (from App) if provided
+  if (externalHandle) {
+    routeHandle = String(externalHandle || "");
   }
+
+  // optional slug from url or prop
+  const paramSlug = (params.slug || "").toString().replace(/^\/*|\/*$/g, "");
+  let routeSlug = externalSlug || paramSlug || ""; // externalSlug prop takes precedence
 
   const [tripTitle, setTripTitle] = useState("");
   const [tripStart, setTripStart] = useState("");
@@ -125,10 +158,8 @@ export default function Travel() {
   const [itinerary, setItinerary] = useState([]);
   const [media, setMedia] = useState([]);
   const localVideoRef = useRef(null);
-  const remoteVideoRef = useRef(null);
   const pcRef = useRef(null);
   const [isBroadcasting, setIsBroadcasting] = useState(false);
-  const [isViewing, setIsViewing] = useState(false);
   const [savedTrips, setSavedTrips] = useState([]);
   const [selectedTripId, setSelectedTripId] = useState(null);
   const [user, setUser] = useState(null);
@@ -148,22 +179,147 @@ export default function Travel() {
   const [confirmItin, setConfirmItin] = useState({ open: false, id: null, title: null });
   const [googleEmbedInput, setGoogleEmbedInput] = useState("");
   const [showEmbedModal, setShowEmbedModal] = useState(false);
-  const [confirmRemoveYoutube, setConfirmRemoveYoutube] = React.useState(false);
-  const [youtubeInput, setYoutubeInput] = useState("");
-  const [savingYouTube, setSavingYouTube] = useState(false);
-  const [showYoutubeModal, setShowYoutubeModal] = useState(false);
+  const [followLoading, setFollowLoading] = useState(false);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [followerCount, setFollowerCount] = useState(0);
 
-  // Derived helper used in JSX to decide owner-only UI
+  // load trip by slug from Firestore and apply visibility checks
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const slug = (routeSlug || "").toString().trim();
+        if (!slug) return;
+
+        if (!useFirebase || !db) {
+          console.warn("[Travel] Firebase not configured; cannot load trip by slug");
+          return;
+        }
+
+        // wait until resolvedUid exists (owner uid for the handle)
+        if (!resolvedUid) return;
+
+        // first try: trip owned by profile with this slug
+        const tripsCol = collection(db, "trips");
+        const qOwnerSlug = query(tripsCol, where("owner_id", "==", resolvedUid), where("slug", "==", slug));
+        const snaps = await getDocs(qOwnerSlug);
+        if (cancelled) return;
+
+        let tripDoc = null;
+        if (snaps && !snaps.empty) {
+          const d = snaps.docs[0];
+          tripDoc = { trip_id: d.id, ...d.data() };
+        } else {
+          // fallback: any trip with that slug
+          const qAnySlug = query(tripsCol, where("slug", "==", slug));
+          const snapsAny = await getDocs(qAnySlug);
+          if (cancelled) return;
+          if (snapsAny && !snapsAny.empty) {
+            const d = snapsAny.docs[0];
+            tripDoc = { trip_id: d.id, ...d.data() };
+          }
+        }
+
+        if (!tripDoc) {
+          if (!cancelled) setNotFound(true);
+          return;
+        }
+
+        const visibility = tripDoc.visibility || (tripDoc.private ? "private" : "public");
+        const ownerId = tripDoc.owner_id || tripDoc.ownerId || null;
+        const allowedUsers = Array.isArray(tripDoc.allowedUsers) ? tripDoc.allowedUsers : (tripDoc.allowed_users || []);
+
+        const isOwnerLocal = user && ownerId && user.uid === ownerId;
+        const isAllowed = user && ownerId && Array.isArray(allowedUsers) && allowedUsers.includes(user.uid);
+
+        if (visibility === "private" && !isOwnerLocal && !isAllowed) {
+          if (!cancelled) {
+            setNotFound(true);
+            setToast({ msg: "This trip is private", type: "warning" });
+            setTimeout(() => setToast(null), 2000);
+          }
+          return;
+        }
+
+        if (!cancelled) {
+          const normalized = {
+            trip_id: tripDoc.trip_id || tripDoc.id || tripDoc.tripId || `trip_local_${Date.now()}`,
+            title: tripDoc.title || tripDoc.name || tripDoc.slug || "Untitled Trip",
+            start_date: tripDoc.startDate || tripDoc.start_date || "",
+            end_date: tripDoc.endDate || tripDoc.end_date || null,
+            private: (tripDoc.visibility === "private") || !!tripDoc.private,
+            itinerary: tripDoc.itinerary || [],
+            media: tripDoc.media || [],
+            last_position: tripDoc.last_position || tripDoc.lastPosition || null,
+            created_at: tripDoc.createdAt || tripDoc.created_at || new Date().toISOString(),
+            ownerId: ownerId,
+            visibility: visibility,
+            allowedUsers: allowedUsers,
+            ...tripDoc,
+          };
+
+          setSelectedTripId(normalized.trip_id);
+          setSelectedTrip(normalized);
+          setTripTitle(normalized.title || "");
+          setTripStart(normalized.start_date || "");
+          setTripEnd(normalized.end_date || "");
+          setTripPrivate(!!normalized.private);
+          setItinerary(Array.isArray(normalized.itinerary) ? normalized.itinerary : []);
+          setTripStartLocation(normalized.startLocation || normalized.start_location || "");
+          setTripDestination(normalized.destination || normalized.dest || "");
+          setTripNotes(normalized.notes || "");
+          setMedia(
+            (normalized.media || []).map((x) => ({
+              id: x.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              type: x.type || "image",
+              url: x.storageUrl || x.url || "",
+              name: x.name || "",
+              date: x.date || new Date().toISOString(),
+            }))
+          );
+          if (normalized.last_position) setPosition(normalized.last_position);
+
+          // ensure URL matches (optional)
+          try {
+            const handlePart = normalizeHandle(profile?.handle || routeHandle || "");
+            const basePath = handlePart ? `/Travel/@${handlePart}` : "/Travel";
+            const slugToUse = normalized.slug || slugify(normalized.title || "") || normalized.trip_id;
+            navigate(`${basePath}/${slugToUse}`, { replace: true });
+          } catch (err) {
+            // ignore navigation errors
+          }
+        }
+      } catch (err) {
+        console.error("[Travel] load trip by slug error:", err);
+        if (!cancelled) setNotFound(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedUid, routeSlug, user, profile, useFirebase, db, navigate]); // include navigate
+
+  useEffect(() => {
+    if (!useFirebase || !db || !user || !resolvedUid) return;
+    const followDoc = doc(db, "follows", `${user.uid}_${resolvedUid}`);
+    const unsub = onSnapshot(followDoc, (snap) => {
+      setIsFollowing(snap.exists());
+    }, (err) => console.error("follow status snapshot failed", err));
+    return () => unsub && unsub();
+  }, [db, user, resolvedUid]);
+
+
+  useEffect(() => {
+    if (!useFirebase || !db || !resolvedUid) return;
+    const q = query(collection(db, "follows"), where("followeeId", "==", resolvedUid));
+    const unsub = onSnapshot(q, (snap) => {
+      setFollowerCount(snap.size); // cheap for small counts; consider aggregation for large apps
+    }, (err) => console.error("followers count snapshot failed", err));
+    return () => unsub && unsub();
+  }, [db, resolvedUid]);
+
   const isOwner = Boolean(user && selectedTrip && (user.uid === selectedTrip.ownerId || user.uid === selectedTrip.owner_id));
-
-  // helper: extract src from iframe HTML or return the raw URL
-  function extractEmbedSrc(input) {
-    if (!input) return "";
-    const m = String(input).match(/src=["']([^"']+)["']/);
-    if (m && m[1]) return m[1];
-    // also allow URL with query params that looks like google maps embed link
-    return String(input).trim();
-  }
 
   async function saveGoogleEmbedForSelectedTrip() {
     if (!selectedTrip || !selectedTrip.trip_id) {
@@ -178,16 +334,14 @@ export default function Travel() {
       return;
     }
 
-    // update local UI immediately
     const payload = { trip_id: selectedTrip.trip_id, googleEmbed: src };
     applyLocalEdit(payload);
     setSelectedTrip((s) => s ? { ...s, googleEmbed: src } : s);
     setToast({ msg: "Map embed applied", type: "success" });
     setTimeout(() => setToast(null), 1400);
 
-    // persist to Firestore if configured and current user is the owner
-    const isOwner = user && (selectedTrip.ownerId === user.uid || selectedTrip.owner_id === user.uid);
-    if (useFirebase && db && user && isOwner) {
+    const ownerFlag = user && (selectedTrip.ownerId === user.uid || selectedTrip.owner_id === user.uid);
+    if (useFirebase && db && user && ownerFlag) {
       try {
         const dr = doc(db, "trips", selectedTrip.trip_id);
         await updateDoc(dr, { googleEmbed: src, updatedAt: new Date().toISOString() });
@@ -200,62 +354,31 @@ export default function Travel() {
         setTimeout(() => setToast(null), 2000);
       }
     } else {
-      // local-only
       setToast({ msg: "Embed stored locally (not persisted)", type: "info" });
       setTimeout(() => setToast(null), 1400);
     }
-  }
-  // top-level helper: remove youtubeId from current selectedTrip (no confirm here — modal handles confirmation)
-  async function clearYouTubeFromTrip() {
-    if (!selectedTrip || !selectedTrip.trip_id) return;
-
-    try {
-      const isOwner = user && (selectedTrip.ownerId === user.uid || selectedTrip.owner_id === user.uid);
-
-      if (isOwner && useFirebase && db) {
-        const dr = doc(db, "trips", selectedTrip.trip_id);
-        await updateDoc(dr, { youtubeId: "", updatedAt: new Date().toISOString() });
-        applyLocalEdit && applyLocalEdit({ trip_id: selectedTrip.trip_id, youtubeId: "" });
-      } else {
-        // local-only fallback
-        applyLocalEdit && applyLocalEdit({ trip_id: selectedTrip.trip_id, youtubeId: "" });
-      }
-
-      setToast && setToast({ msg: "YouTube link removed", type: "info" });
-      setTimeout(() => setToast && setToast(null), 1200);
-    } catch (err) {
-      console.error("clearYouTubeFromTrip failed", err);
-      setToast && setToast({ msg: "Failed to remove link", type: "warning" });
-      setTimeout(() => setToast && setToast(null), 1400);
-    }
-  }
-
-  // helper: extract YouTube video id from many forms (url, embed, short)
-  function extractYouTubeId(input) {
-    if (!input) return null;
-    const s = String(input).trim();
-    // iframe src
-    const srcMatch = s.match(/src=["']([^"']+)["']/);
-    const candidate = srcMatch ? srcMatch[1] : s;
-    // common patterns
-    const m =
-      candidate.match(/(?:v=)([A-Za-z0-9_\-]{6,})/) ||
-      candidate.match(/(?:youtu\.be\/)([A-Za-z0-9_\-]{6,})/) ||
-      candidate.match(/\/embed\/([A-Za-z0-9_\-]{6,})/) ||
-      candidate.match(/youtube\.com\/shorts\/([A-Za-z0-9_\-]{6,})/);
-    return m ? m[1] : null;
   }
 
   // ---------- helper: visibility ----------
   function getVisibilityInfo(trip, user) {
     if (!trip) return { icon: "❓", label: "Unknown" };
     const visibility = trip.visibility || (trip.private ? "private" : "public");
-    const isOwner = user && (trip.ownerId === user.uid || trip.owner_id === user.uid);
+    const isOwnerLocal = user && (trip.ownerId === user.uid || trip.owner_id === user.uid);
 
-    if (visibility === "public") return { icon: "🌐", label: "Public" };
+    if (visibility === "public") {
+      return { icon: "🌐", label: "Public" };
+    }
+
+    if (visibility === "restricted") {
+      if (isOwnerLocal) return { icon: "🔑", label: "Restricted (you own this)" };
+      if (Array.isArray(trip.allowedUsers) && user && trip.allowedUsers.includes(user.uid)) {
+        return { icon: "🔑", label: "Restricted (you have access)" };
+      }
+      return { icon: "🔑", label: "Restricted" };
+    }
 
     if (visibility === "private") {
-      if (isOwner) return { icon: "🔒", label: "Private (you own this)" };
+      if (isOwnerLocal) return { icon: "🔒", label: "Private (you own this)" };
       if (Array.isArray(trip.allowedUsers) && user && trip.allowedUsers.includes(user.uid)) {
         return { icon: "🔑", label: "Restricted (you have access)" };
       }
@@ -265,8 +388,9 @@ export default function Travel() {
     return { icon: "❓", label: "Unknown" };
   }
 
+
   useEffect(() => {
-    // // console.debug("[Travel] mount", { routeHandle, useFirebase, params });
+    // mount debug
   }, []);
 
   /* ---------- resolve handle -> uid ---------- */
@@ -436,100 +560,273 @@ export default function Travel() {
         const tb = b.created_at ? Date.parse(b.created_at) : 0;
         return tb - ta;
       });
+
       setSavedTrips(arr);
+      // if a slug is present in the URL, try to auto-select the matching trip
+      if (routeSlug) {
+        try {
+          const bySlug = arr.find(
+            (t) =>
+              (t.slug && t.slug === routeSlug) ||
+              (t.slug && slugify(t.slug) === routeSlug) ||
+              (t.title && slugify(t.title) === routeSlug) ||
+              t.trip_id === routeSlug
+          );
+          if (bySlug) {
+            // set selected trip (merge ensures consistent state)
+            setSelectedTripId(bySlug.trip_id);
+            setSelectedTrip(bySlug);
+            setTripTitle(bySlug.title || "");
+            setTripStart(bySlug.start_date || bySlug.startDate || "");
+            setTripEnd(bySlug.end_date || bySlug.endDate || "");
+            setTripPrivate(!!bySlug.private);
+            setItinerary(bySlug.itinerary || []);
+            setTripStartLocation(bySlug.startLocation || bySlug.start_location || "");
+            setTripDestination(bySlug.destination || bySlug.dest || "");
+            setTripNotes(bySlug.notes || "");
+            setMedia(
+              (bySlug.media || []).map((x) => ({
+                id: x.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                type: x.type || "image",
+                url: x.storageUrl || x.url || "",
+                name: x.name || "",
+                date: x.date || new Date().toISOString(),
+              }))
+            );
+            if (bySlug.last_position) setPosition(bySlug.last_position);
+          }
+        } catch (err) {
+          console.warn("[Travel] routeSlug auto-select failed:", err);
+        }
+      }
+
+
+      try {
+        if (selectedTripId) {
+          const updated = tripsMap.get(selectedTripId);
+          if (updated) {
+            const merged = { ...(selectedTrip || {}), ...updated };
+            setSelectedTrip(merged);
+
+            setTripTitle(merged.title || "");
+            setTripStart(merged.start_date || merged.startDate || "");
+            setTripEnd(merged.end_date || merged.endDate || "");
+            setTripPrivate(!!merged.private);
+            setItinerary(Array.isArray(merged.itinerary) ? merged.itinerary : (itinerary || []));
+            setTripStartLocation(merged.startLocation || merged.start_location || "");
+            setTripDestination(merged.destination || merged.dest || "");
+            setTripNotes(merged.notes || merged.notes || "");
+            setMedia(
+              (merged.media || []).map((x) => ({
+                id: x.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                type: x.type || "image",
+                url: x.storageUrl || x.url || "",
+                name: x.name || "",
+                date: x.date || new Date().toISOString(),
+              }))
+            );
+
+            if (merged.last_position) setPosition(merged.last_position);
+          } else {
+            setSelectedTripId(null);
+            setSelectedTrip(null);
+          }
+        }
+      } catch (err) {
+        console.warn("[Travel] pushSnapshotToMap: failed to sync selectedTrip", err);
+      }
+
+      try {
+        if (!selectedTripId && arr.length > 0) {
+          const now = Date.now();
+
+          const candidates = arr
+            .map((t) => {
+              const startedFlag = !!t.started;
+              const startedAtNum = t.startedAt ? Date.parse(t.startedAt) : (t.started_at ? Date.parse(t.started_at) : NaN);
+              return { t, startedFlag, startedAtNum: Number.isFinite(startedAtNum) ? startedAtNum : (startedFlag ? 0 : NaN) };
+            })
+            .filter((x) => x.startedFlag || (Number.isFinite(x.startedAtNum) && x.startedAtNum <= now));
+
+          if (candidates.length > 0) {
+            candidates.sort((a, b) => (b.startedAtNum || 0) - (a.startedAtNum || 0));
+            const chosen = candidates[0].t;
+
+            setSelectedTripId(chosen.trip_id);
+            setSelectedTrip(chosen);
+            setTripTitle(chosen.title || "");
+            setTripStart(chosen.start_date || chosen.startDate || "");
+            setTripEnd(chosen.end_date || chosen.endDate || "");
+            setTripPrivate(!!chosen.private);
+            setItinerary(chosen.itinerary || []);
+            setTripStartLocation(chosen.startLocation || chosen.start_location || "");
+            setTripDestination(chosen.destination || chosen.dest || "");
+            setTripNotes(chosen.notes || "");
+            setMedia(
+              (chosen.media || []).map((x) => ({
+                id: x.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                type: x.type || "image",
+                url: x.storageUrl || x.url || "",
+                name: x.name || "",
+                date: x.date || new Date().toISOString(),
+              }))
+            );
+            if (chosen.last_position) setPosition(chosen.last_position);
+          }
+        }
+      } catch (err) {
+        console.warn("[Travel] auto-select started trip failed:", err);
+      }
     };
 
-    // load subscriptions based on owner / visitor logic
     const setupSubscriptions = (currentUser) => {
-      // cleanup previous
-      try {
-        tripsUnsub && tripsUnsub();
-      } catch (e) { }
+      // clean up previous listeners if any
+      if (tripsUnsub) {
+        try { tripsUnsub(); } catch (e) { /* ignore */ }
+      }
       tripsMap.clear();
 
       const unsubscribers = [];
 
       const ownerId = resolvedUid || (currentUser && currentUser.uid) || null;
-      // // console.debug("[Travel] subscribing trips for ownerId:", ownerId, "viewer:", currentUser?.uid);
-
       if (!ownerId) {
+        // no owner to subscribe to -> clear UI
         setSavedTrips([]);
         tripsUnsub = null;
         return;
       }
 
-      // If viewer is owner, subscribe to ALL trips by owner
-      if (currentUser && currentUser.uid === ownerId) {
-        const qOwner = query(collection(db, "trips"), where("owner_id", "==", ownerId), orderBy("createdAt", "desc"));
-        const unsubOwner = onSnapshot(
-          qOwner,
-          (snap) => {
-            const items = processSnapshot(snap);
-            pushSnapshotToMap(items);
-          },
-          (err) => {
-            console.error("owner trips onSnapshot error", err);
-            setToast({ msg: "Failed to sync trips", type: "warning" });
-            setTimeout(() => setToast(null), 2000);
-          }
-        );
-        unsubscribers.push(unsubOwner);
-      } else {
-        // Not owner: public trips + restricted trips where user is allowed
-        const qPublic = query(
-          collection(db, "trips"),
-          where("owner_id", "==", ownerId),
-          where("visibility", "==", "public"),
-          orderBy("createdAt", "desc")
-        );
-        const unsubPublic = onSnapshot(
-          qPublic,
-          (snap) => {
-            const items = processSnapshot(snap);
-            pushSnapshotToMap(items);
-          },
-          (err) => {
-            console.error("public trips onSnapshot error", err);
-          }
-        );
-        unsubscribers.push(unsubPublic);
+      const isViewerOwner = currentUser && currentUser.uid === ownerId;
 
-        if (currentUser && currentUser.uid) {
-          // restricted where allowedUsers contains current user
+      // 1) Owner-all subscription (only for owner)
+      if (isViewerOwner) {
+        try {
+          const qOwnerAll = query(
+            collection(db, "trips"),
+            where("owner_id", "==", ownerId),
+            orderBy("createdAt", "desc")
+          );
+
+          const unsubOwnerAll = onSnapshot(
+            qOwnerAll,
+            (snap) => {
+              try {
+                const items = processSnapshot(snap);
+                pushSnapshotToMap(items);
+              } catch (err) {
+                console.error("[Travel.qOwnerAll snapshot] processing error:", err);
+              }
+            },
+            (err) => {
+              if (err?.code === "permission-denied") {
+                console.warn(
+                  `[Travel] Permission denied while subscribing to owner-all trips for ownerId=${ownerId}.`
+                );
+                return;
+              }
+              console.error("[Travel] owner-all trips subscription failed:", err);
+              setToast({ msg: "Failed to sync trips (owner-all)", type: "warning" });
+              setTimeout(() => setToast(null), 2000);
+            }
+          );
+
+          unsubscribers.push(unsubOwnerAll);
+        } catch (err) {
+          console.error("Failed to subscribe to owner-all trips", err);
+        }
+      }
+
+      // 2) Public trips for this owner (always subscribe for non-owner viewers and anonymous)
+      //    If viewer is the owner, this is redundant but harmless; we only add it when not owner to avoid duplication.
+      if (!isViewerOwner) {
+        try {
+          const qPublic = query(
+            collection(db, "trips"),
+            where("owner_id", "==", ownerId),
+            where("visibility", "==", "public"),
+            orderBy("createdAt", "desc")
+          );
+
+          const unsubPublic = onSnapshot(
+            qPublic,
+            (snap) => {
+              try {
+                const items = processSnapshot(snap);
+                pushSnapshotToMap(items);
+              } catch (err) {
+                console.error("[Travel.qPublic snapshot] processing error:", err);
+              }
+            },
+            (err) => {
+              if (err?.code === "permission-denied") {
+                // public should normally be readable, but handle gracefully
+                console.warn(`[Travel] Permission denied while subscribing to public trips for ownerId=${ownerId}.`);
+                return;
+              }
+              console.error("[Travel] public trips subscription failed:", err);
+              setToast({ msg: "Failed to sync public trips", type: "warning" });
+              setTimeout(() => setToast(null), 2000);
+            }
+          );
+
+          unsubscribers.push(unsubPublic);
+        } catch (err) {
+          console.error("Failed to subscribe to public trips", err);
+        }
+      }
+
+      // 3) Allowed trips subscription (for viewers who are specifically allowed)
+      if (!(currentUser && currentUser.uid === ownerId) && currentUser && currentUser.uid) {
+        try {
           const qAllowed = query(
             collection(db, "trips"),
             where("owner_id", "==", ownerId),
             where("allowedUsers", "array-contains", currentUser.uid),
             orderBy("createdAt", "desc")
           );
+
           const unsubAllowed = onSnapshot(
             qAllowed,
             (snap) => {
-              const items = processSnapshot(snap);
-              pushSnapshotToMap(items);
+              try {
+                const items = processSnapshot(snap);
+                pushSnapshotToMap(items);
+              } catch (err) {
+                console.error("[Travel.qAllowed snapshot] processing error:", err);
+              }
             },
             (err) => {
+              if (err?.code === "permission-denied") {
+                console.warn(
+                  `[Travel] Permission denied while subscribing to allowed trips for ownerId=${ownerId} (viewer=${currentUser?.uid}).`
+                );
+                return;
+              }
               console.error("allowed trips onSnapshot error", err);
+              setToast({ msg: "Failed to sync allowed trips", type: "warning" });
+              setTimeout(() => setToast(null), 2000);
             }
           );
+
           unsubscribers.push(unsubAllowed);
+        } catch (err) {
+          console.error("Failed to subscribe to allowed trips", err);
         }
       }
 
+      // Save a combined unsubscribe function
       tripsUnsub = () => {
         try {
-          unsubscribers.forEach((u) => u && u());
-        } catch (e) { }
+          unsubscribers.forEach((u) => { try { u && u(); } catch (e) { /* ignore */ } });
+        } catch (e) { /* ignore */ }
       };
     };
 
     (async () => {
       try {
-        // Wait for auth state; do NOT auto-sign-in anonymously here.
         authUnsub = onAuthStateChanged(auth, (u) => {
           setUser(u || null);
           setFirebaseReady(true);
-          // reset savedTrips when auth changes
           setupSubscriptions(u);
         });
       } catch (err) {
@@ -545,7 +842,7 @@ export default function Travel() {
     };
   }, [resolvedUid]);
 
-  /* ---------- trip:created event handler (prefer dispatched data; only fetch when authorized) ---------- */
+  /* ---------- trip:created event handler ---------- */
   useEffect(() => {
     let mounted = true;
 
@@ -601,13 +898,11 @@ export default function Travel() {
     const onTripCreated = async (e) => {
       try {
         const detail = e?.detail || {};
-        // If full trip object was dispatched, use it directly
         if (detail.trip) {
           handleLoadedTripFromDoc(detail.trip);
           return;
         }
 
-        // Otherwise try to fetch only when safe
         const tripId = detail.trip_id || detail.id || null;
         const ownerHint = detail.owner_id || detail.ownerId || null;
         const visibilityHint = detail.visibility || null;
@@ -615,7 +910,6 @@ export default function Travel() {
         let docData = null;
 
         if (useFirebase && user && tripId) {
-          // If we are definitely the owner, fetch is allowed
           if (ownerHint && user.uid === ownerHint) {
             try {
               const dr = doc(db, "trips", tripId);
@@ -627,7 +921,6 @@ export default function Travel() {
               console.error("fetch created trip error (owner)", err);
             }
           } else if (visibilityHint === "public") {
-            // public trip — fetch allowed
             try {
               const dr = doc(db, "trips", tripId);
               const snap = await getDoc(dr);
@@ -638,26 +931,19 @@ export default function Travel() {
               console.error("fetch created trip error (public)", err);
             }
           } else if (user && user.uid && ownerHint && ownerHint !== user.uid) {
-            // not owner: only fetch if user is in allowedUsers — but we don't have that info without reading.
-            // To avoid permission errors, skip fetching and fall back to detail.
-            // (Alternatively, you could attempt the fetch and catch a permission error.)
             try {
               const dr = doc(db, "trips", tripId);
               const snap = await getDoc(dr);
               if (snap && snap.exists()) {
-                // If allowed, this will succeed; otherwise it will throw and be caught.
                 docData = { trip_id: snap.id, ...snap.data() };
               }
             } catch (err) {
               console.warn("fetch created trip blocked by rules or not allowed:", err?.message || err);
             }
-          } else {
-            // no user or unknown owner: skip fetch
           }
         }
 
         if (!docData) {
-          // fallback to the detail payload (local optimistic copy)
           const fallback = {
             trip_id: tripId || localUid(),
             title: detail.title || detail.name || "Untitled Trip",
@@ -676,7 +962,6 @@ export default function Travel() {
           return;
         }
 
-        // we have docData from Firestore
         handleLoadedTripFromDoc(docData);
       } catch (err) {
         console.error("Error handling trip:created:", err);
@@ -692,11 +977,14 @@ export default function Travel() {
     };
   }, [user]);
 
-  // create a local trip by dispatching `trip:created` event; existing listener will pick it up
+  // create a local trip by dispatching `trip:created` event
   const createLocalTrip = (overrides = {}) => {
+    const title = overrides.title || "New Trip";
+    const computedSlug = overrides.slug || slugify(title) || localUid("slug");
     const detail = {
       trip_id: localUid(),
-      title: overrides.title || "New Trip",
+      title,
+      slug: computedSlug,
       start_date: normalizeDate(new Date()),
       end_date: null,
       itinerary: [],
@@ -706,40 +994,25 @@ export default function Travel() {
       ...overrides,
     };
     window.dispatchEvent(new CustomEvent("trip:created", { detail }));
-  };
 
-  async function uploadAndSaveMedia(items, tripId) {
-    if (!useFirebase || !user) {
-      console.warn("Firebase not available for media upload");
-      return items;
+    // update URL to reflect the created trip
+    try {
+      const handlePart = normalizeHandle(profile?.handle || routeHandle || "");
+      const basePath = handlePart ? `/Travel/@${handlePart}` : "/Travel";
+      navigate(`${basePath}/${detail.slug}`, { replace: true });
+    } catch (err) {
+      // ignore
     }
-    const uploaded = [];
-    for (const it of items) {
-      try {
-        if (it.file) {
-          const storageUrl = await uploadFileToStorage(user.uid, tripId, it.file);
-          uploaded.push({ ...it, storageUrl, url: storageUrl, file: undefined });
-        } else {
-          uploaded.push(it);
-        }
-      } catch (err) {
-        console.error("upload file failed", err);
-        uploaded.push(it);
-      }
-    }
-    return uploaded;
-  }
+  };
 
   // ---------- NEW: save itinerary to Firestore helper ----------
   async function saveItineraryForTrip(tripId, newItinerary) {
     if (!useFirebase || !db) {
-      // Not configured — nothing to persist
       return { ok: false, reason: "no-firebase" };
     }
     if (!tripId) return { ok: false, reason: "no-trip-id" };
     try {
       const docRef = doc(db, "trips", tripId);
-      // update only itinerary and updatedAt to avoid overwrite
       await updateDoc(docRef, { itinerary: newItinerary, updatedAt: new Date().toISOString() });
       return { ok: true };
     } catch (err) {
@@ -747,12 +1020,13 @@ export default function Travel() {
       return { ok: false, reason: err?.message || String(err) };
     }
   }
+
   // open confirm modal for itinerary item
   const confirmDeleteItinerary = (itemId, title = "") => {
     setConfirmItin({ open: true, id: itemId, title });
   };
 
-  // perform confirmed delete (calls existing deleteItineraryItem helper)
+  // perform confirmed delete
   const confirmDeleteItineraryConfirmed = async () => {
     const id = confirmItin.id;
     setConfirmItin({ open: false, id: null, title: null });
@@ -768,21 +1042,18 @@ export default function Travel() {
 
   // addItinerary: used by modal "Add"
   const addItinerary = async (item) => {
-    // optimistic update local state (append item at end)
     setItinerary((prev) => {
       const arr = [...(Array.isArray(prev) ? prev : [])];
       arr.push(item);
       return arr;
     });
 
-    // Try to persist if we have a selectedTrip and we own it
     const tripId = selectedTrip?.trip_id || selectedTripId;
-    const isOwner = user && (selectedTrip?.ownerId === user.uid || selectedTrip?.owner_id === user.uid);
-    if (useFirebase && db && tripId && isOwner) {
+    const isOwnerLocal = user && (selectedTrip?.ownerId === user.uid || selectedTrip?.owner_id === user.uid);
+    if (useFirebase && db && tripId && isOwnerLocal) {
       try {
-        // take current stored itinerary as base (fallback to local state)
         const base = Array.isArray(selectedTrip?.itinerary) ? [...selectedTrip.itinerary] : Array.isArray(itinerary) ? [...itinerary] : [];
-        const newIt = [...base, item]; // append
+        const newIt = [...base, item];
         const res = await saveItineraryForTrip(tripId, newIt);
         if (res.ok) {
           applyLocalEdit({ trip_id: tripId, itinerary: newIt, updatedAt: new Date().toISOString() });
@@ -804,7 +1075,6 @@ export default function Travel() {
         setTimeout(() => setToast(null), 2200);
       }
     } else {
-      // Not owner or no firebase => local only
       setSelectedTrip((s) => s ? { ...s, itinerary: [...(s.itinerary || []), item] } : s);
       setToast({ msg: "Added to local itinerary", type: "info" });
       setTimeout(() => setToast(null), 1500);
@@ -814,15 +1084,13 @@ export default function Travel() {
   // ---------- delete itinerary item ----------
   const deleteItineraryItem = async (itemId) => {
     if (!itemId) return;
-    // optimistic local update
     setItinerary((prev) => (Array.isArray(prev) ? prev.filter((it) => it.id !== itemId) : prev));
 
     const tripId = selectedTrip?.trip_id || selectedTripId;
-    const isOwner = user && (selectedTrip?.ownerId === user.uid || selectedTrip?.owner_id === user.uid);
+    const isOwnerLocal = user && (selectedTrip?.ownerId === user.uid || selectedTrip?.owner_id === user.uid);
 
-    if (useFirebase && db && tripId && isOwner) {
+    if (useFirebase && db && tripId && isOwnerLocal) {
       try {
-        // base from selectedTrip if available to avoid race with local state
         const base = Array.isArray(selectedTrip?.itinerary) ? [...selectedTrip.itinerary] : (Array.isArray(itinerary) ? [...itinerary] : []);
         const newIt = base.filter((it) => it.id !== itemId);
         const res = await saveItineraryForTrip(tripId, newIt);
@@ -834,7 +1102,6 @@ export default function Travel() {
           setTimeout(() => setToast(null), 1400);
           return;
         } else {
-          // persist failed; keep local change but warn
           setToast({ msg: "Deleted locally (failed to sync)", type: "warning" });
           setTimeout(() => setToast(null), 2200);
           setSelectedTrip((s) => (s ? { ...s, itinerary: newIt } : s));
@@ -847,7 +1114,6 @@ export default function Travel() {
         setTimeout(() => setToast(null), 2200);
       }
     } else {
-      // local-only
       setSelectedTrip((s) =>
         s
           ? { ...s, itinerary: (Array.isArray(s.itinerary) ? s.itinerary.filter((it) => it.id !== itemId) : []) }
@@ -872,7 +1138,7 @@ export default function Travel() {
     }
     if (selectedTripId === id) {
       setSelectedTripId(null);
-      setSelectedTrip(null); // <- clear full selected trip too
+      setSelectedTrip(null);
     }
     setConfirmDelete({ open: false, id: null });
   }
@@ -886,21 +1152,23 @@ export default function Travel() {
 
       // If media files were provided in the edit form, upload them first
       if (Array.isArray(merged.media)) {
-        // detect items with .file and upload
         const needUpload = merged.media.some((m) => m && m.file);
         if (needUpload && useFirebase && user) {
-          merged.media = await uploadAndSaveMedia(merged.media, merged.trip_id);
+          // NOTE: uploadAndSaveMedia was moved to GalleryPanel and exported
+          merged.media = await uploadAndSaveMedia(merged.media, merged.trip_id, user);
         }
       }
 
       // Persist to Firestore if configured and owner
-      const isOwner = user && (merged.ownerId === user.uid || merged.owner_id === user.uid);
-      if (useFirebase && user && isOwner) {
+      const isOwnerLocal = user && (merged.ownerId === user.uid || merged.owner_id === user.uid);
+      if (useFirebase && user && isOwnerLocal) {
         try {
-          // Only write the fields the UI cares about to avoid clobbering other server data.
           const docRef = doc(db, "trips", merged.trip_id);
+          // inside handleSaveEdit, replace the payload object creation with this:
+
           const payload = {
             title: merged.title,
+            slug: merged.slug || slugify(merged.title || "") || undefined,
             startDate: merged.start_date || merged.startDate || null,
             endDate: merged.end_date || merged.endDate || null,
             visibility: merged.visibility || (merged.private ? "private" : "public"),
@@ -909,22 +1177,39 @@ export default function Travel() {
             notes: merged.notes || merged.notes || null,
             destination: merged.destination || merged.dest || null,
             startLocation: merged.startLocation || merged.start_location || null,
+            // --- NEW: persist allowedUsers properly when visibility is restricted ---
+            allowedUsers:
+              (merged.visibility || (merged.private ? "private" : "public")) === "restricted"
+                ? // accept merged.allowedUsers if present, or empty array otherwise
+                (Array.isArray(merged.allowedUsers) ? merged.allowedUsers.slice() : [])
+                : [],
             updatedAt: new Date().toISOString(),
           };
-          // Clean undefined values
+
+          // Ensure owner uid is present in allowedUsers for restricted visibility
+          if (payload.visibility === "restricted") {
+            try {
+              const ownerId = merged.ownerId || merged.owner_id || user?.uid || null;
+              if (ownerId) {
+                const set = new Set(Array.isArray(payload.allowedUsers) ? payload.allowedUsers : []);
+                set.add(ownerId);
+                payload.allowedUsers = Array.from(set);
+              }
+            } catch (err) {
+              // ignore - owner add is a best-effort safety net
+            }
+          }
+
           Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
           await updateDoc(docRef, payload);
-          // optimistic local apply
           applyLocalEdit({ trip_id: merged.trip_id, ...payload });
         } catch (err) {
           console.error("[Travel] save edit to Firestore failed:", err);
-          // still apply locally to avoid data loss
           applyLocalEdit(merged);
           setToast({ msg: "Saved locally (failed to sync)", type: "warning" });
           setTimeout(() => setToast(null), 2000);
         }
       } else {
-        // local-only apply
         applyLocalEdit(merged);
       }
 
@@ -939,8 +1224,8 @@ export default function Travel() {
 
   const openEditModal = (t) => {
     if (!t) return;
-    const isOwner = user && (t.ownerId === user.uid || t.owner_id === user.uid);
-    if (!isOwner) {
+    const isOwnerLocal = user && (t.ownerId === user.uid || t.owner_id === user.uid);
+    if (!isOwnerLocal) {
       setToast({ msg: "You don't have permission to edit this trip", type: "warning" });
       setTimeout(() => setToast(null), 2000);
       return;
@@ -951,7 +1236,6 @@ export default function Travel() {
 
   function applyLocalEdit(updated) {
     if (!updated || !updated.trip_id) return;
-    // update selectedTrip if it's the one
     if (selectedTripId === updated.trip_id) {
       const merged = { ...selectedTrip, ...updated };
       setSelectedTrip(merged);
@@ -961,7 +1245,6 @@ export default function Travel() {
       setTripStartLocation(merged.startLocation || merged.start_location || "");
       setTripDestination(merged.destination || merged.dest || "");
       setTripNotes(merged.notes || "");
-      // also sync internal itinerary state if provided
       if (Array.isArray(merged.itinerary)) setItinerary(merged.itinerary);
     }
     setSavedTrips((prev) => prev.map((t) => (t.trip_id === updated.trip_id ? { ...t, ...updated } : t)));
@@ -994,111 +1277,10 @@ export default function Travel() {
     }
   };
 
-  const handleMediaSelected = (e) => {
-    const files = Array.from(e.target.files || []);
-    const newItems = files.map((file) => ({
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      type: file.type.startsWith("video") ? "video" : "image",
-      url: URL.createObjectURL(file),
-      name: file.name,
-      date: new Date().toISOString(),
-      file,
-    }));
-    setMedia((m) => [...newItems, ...m]);
-  };
-
-  const removeMedia = (id) => setMedia((m) => m.filter((x) => x.id !== id));
-  async function startBroadcast() {
-    if (isBroadcasting) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      if (localVideoRef.current) localVideoRef.current.srcObject = stream;
-
-      const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-      pcRef.current = pc;
-      pc.onicecandidate = () => { };
-      stream.getTracks().forEach((t) => pc.addTrack(t, stream));
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      setIsBroadcasting(true);
-    } catch (e) {
-      console.error("startBroadcast error", e);
-      alert("Unable to access camera/mic: " + (e.message || e));
-    }
-  }
-  function stopBroadcast() {
-    setIsBroadcasting(false);
-    if (pcRef.current) {
-      try {
-        pcRef.current.getSenders().forEach((s) => s.track?.stop());
-        pcRef.current.close();
-      } catch (e) { }
-      pcRef.current = null;
-    }
-    if (localVideoRef.current?.srcObject) {
-      localVideoRef.current.srcObject.getTracks().forEach((t) => t.stop());
-      localVideoRef.current.srcObject = null;
-    }
-  }
-  async function saveYouTubeToTrip() {
-    if (!selectedTrip || !selectedTrip.trip_id) {
-      setToast && setToast({ msg: "Select a trip first", type: "warning" });
-      setTimeout(() => setToast && setToast(null), 1400);
-      return;
-    }
-
-    const id = extractYouTubeId(youtubeInput || selectedTrip.youtubeId || "");
-    if (!id) {
-      setToast && setToast({ msg: "Paste a valid YouTube watch/embed URL or iframe", type: "warning" });
-      setTimeout(() => setToast && setToast(null), 1800);
-      return;
-    }
-
-    setSavingYouTube(true);
-    try {
-      const isOwner = user && (selectedTrip.ownerId === user.uid || selectedTrip.owner_id === user.uid);
-
-      if (isOwner && useFirebase && db) {
-        try {
-          const dr = doc(db, "trips", selectedTrip.trip_id);
-          await updateDoc(dr, { youtubeId: id, updatedAt: new Date().toISOString() });
-          applyLocalEdit && applyLocalEdit({ trip_id: selectedTrip.trip_id, youtubeId: id, updated_at: new Date().toISOString() });
-          setToast && setToast({ msg: "YouTube link saved", type: "success" });
-          setTimeout(() => setToast && setToast(null), 1400);
-        } catch (err) {
-          console.error("saveYouTubeToTrip (firestore) failed:", err);
-          applyLocalEdit && applyLocalEdit({ trip_id: selectedTrip.trip_id, youtubeId: id });
-          setToast && setToast({ msg: "Saved locally (failed to sync)", type: "warning" });
-          setTimeout(() => setToast && setToast(null), 1800);
-        }
-      } else {
-        // local-only
-        applyLocalEdit && applyLocalEdit({ trip_id: selectedTrip.trip_id, youtubeId: id });
-        setToast && setToast({ msg: "Saved locally (not persisted)", type: "info" });
-        setTimeout(() => setToast && setToast(null), 1400);
-      }
-
-      // keep input synced to the saved id
-      setYoutubeInput(`https://www.youtube.com/watch?v=${id}`);
-    } finally {
-      setSavingYouTube(false);
-    }
-  }
-
-  function openYoutubeModal(prefill = "") {
-    // prefill input from selectedTrip or explicit prefill
-    if (prefill) setYoutubeInput(prefill);
-    else if (selectedTrip?.youtubeId) setYoutubeInput(`https://www.youtube.com/watch?v=${selectedTrip.youtubeId}`);
-    else setYoutubeInput("");
-    setShowYoutubeModal(true);
-  }
-
   // ---------- permissions helper ----------
   const canEditItinerary = useMemo(() => {
     return Boolean(
-      // editing allowed if not in public view (local owner/editor)
       !isPublicView ||
-      // or signed-in user is the resolved profile owner, or the selected trip owner
       (user && (
         (resolvedUid && user.uid === resolvedUid) ||
         (selectedTrip && (selectedTrip.ownerId === user.uid || selectedTrip.owner_id === user.uid))
@@ -1109,7 +1291,8 @@ export default function Travel() {
   /* ---------- UI helpers ---------- */
   const loadTrip = (t) => {
     if (!t) return;
-    setSelectedTrip(t); // <-- IMPORTANT: set the whole object for header visibility icon, notes, etc.
+
+    setSelectedTrip(t);
     setSelectedTripId(t.trip_id);
     setTripTitle(t.title || "");
     setTripStart(t.start_date || t.startDate || "");
@@ -1127,6 +1310,16 @@ export default function Travel() {
       date: x.date || new Date().toISOString(),
     })));
     if (t.last_position) setPosition(t.last_position);
+
+    // push slug to URL
+    try {
+      const slug = t.slug || (t.title ? slugify(t.title) : t.trip_id);
+      const handlePart = normalizeHandle(profile?.handle || routeHandle || "");
+      const basePath = handlePart ? `/Travel/@${handlePart}` : "/Travel";
+      navigate(`${basePath}/${slug}`, { replace: true });
+    } catch (err) {
+      console.warn("[Travel] failed to update URL for trip:", err);
+    }
   };
 
 
@@ -1149,38 +1342,152 @@ export default function Travel() {
     );
   }
 
+  async function toggleFollow() {
+    if (!resolvedUid || !user || !user.uid) {
+      setToast({ msg: "Sign in to follow", type: "warning" }); setTimeout(() => setToast(null), 1400);
+      return;
+    }
+    if (resolvedUid === user.uid) {
+      setToast({ msg: "You cannot follow yourself", type: "warning" }); setTimeout(() => setToast(null), 1400);
+      return;
+    }
+    if (!useFirebase || !db) {
+      setIsFollowing((p) => !p);
+      return;
+    }
+
+    const followDocId = `${user.uid}_${resolvedUid}`;
+    const followRef = doc(db, "follows", followDocId);
+
+    setFollowLoading(true);
+    try {
+      if (isFollowing) {
+        // unfollow: delete follow doc (allowed because follower == auth.uid)
+        await deleteDoc(followRef);
+        setIsFollowing(false);
+        setToast({ msg: "Unfollowed", type: "info" });
+      } else {
+        // follow: create follow doc
+        await setDoc(followRef, { followerId: user.uid, followeeId: resolvedUid, createdAt: serverTimestamp() });
+        setIsFollowing(true);
+        setToast({ msg: "Now following", type: "success" });
+      }
+    } catch (err) {
+      console.error("toggleFollow (follows collection) failed:", err);
+      setToast({ msg: "Failed to update follow", type: "warning" });
+    } finally {
+      setFollowLoading(false);
+      setTimeout(() => setToast(null), 1400);
+    }
+  }
+
+  function getTripStatus(trip, now = Date.now()) {
+    if (!trip) return { key: "unknown", label: "Unknown", icon: "❓", color: "gray" };
+
+    const startMs = Date.parse(trip.start_date || trip.startDate || "");
+    const endMs = Date.parse(trip.end_date || trip.endDate || "");
+    const started = trip.started === true;
+    const stopped = trip.stopped === true || trip.stoppedAt || trip.stopped_at;
+
+    if (Number.isFinite(startMs) && startMs > now) {
+      return { key: "upcoming", label: "Upcoming", icon: "📅", color: "blue" };
+    }
+
+    if (Number.isFinite(endMs) && endMs < now) {
+      return { key: "completed", label: "Completed", icon: "✅", color: "green" };
+    }
+
+    if (started && !stopped) {
+      return { key: "active", label: "Active now", icon: "🚴", color: "red" };
+    }
+
+    return { key: "ongoing", label: "Ongoing (paused)", icon: "⏸️", color: "orange" };
+  }
+
   return (
     <div className="travel-container">
+      {isOwner && getTripStatus(selectedTrip).key === "ongoing" && (
+        <div className="warning-banner">
+          ⚠️ Your trip "{selectedTrip.title}" is scheduled for today but hasn’t been started yet. start your trip from your mobile app
+        </div>
+      )}
+      {!isOwner && getTripStatus(selectedTrip).key === "ongoing" && (
+        <div className="info-banner">
+          🚧 This trip is ongoing ({tripStart} → {tripEnd}), but the rider hasn’t started tracking yet.
+          Check back later for live updates!
+        </div>
+      )}
       <header className="travel-header">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, width: "100%" }}>
           <div style={{ minWidth: 0 }}>
-            {/* Title: prefer selected trip title when a trip is loaded */}
-            <h1 style={{ marginBottom: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <span>{selectedTripId ? (tripTitle || "Trip Title") : (isPublicView ? (profile?.displayName || "Profile") : (tripTitle ? `${tripTitle} — Live` : "Untitled Trip — Live"))}</span>
+            {/* Trip title */}
+            <h1 style={{ marginBottom: 4, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                <span style={{ whiteSpace: "nowrap", overflow: "visible" }}>
+                  {selectedTripId
+                    ? (tripTitle || "Trip Title")
+                    : (isPublicView
+                      ? (profile?.displayName || "Profile")
+                      : (tripTitle ? `${tripTitle} — Live` : "Untitled Trip — Live"))}
+                </span>
+
+                {isTripActive(selectedTrip) && (
+                  <span
+                    style={{
+                      marginLeft: 6,
+                      backgroundColor: "#ef4444", // red
+                      color: "white",
+                      fontSize: "12px",
+                      fontWeight: "bold",
+                      padding: "2px 6px",
+                      borderRadius: "4px",
+                    }}
+                  >
+                    LIVE
+                  </span>
+                )}
+
+
+              </span>
 
               {selectedTrip && (
-                <span title={getVisibilityInfo(selectedTrip, user).label} style={{ fontSize: 16, opacity: 0.9 }}>
+                <span
+                  title={getVisibilityInfo(selectedTrip, user).label}
+                  style={{ fontSize: 16, opacity: 0.9 }}
+                >
                   {getVisibilityInfo(selectedTrip, user).icon}
                 </span>
               )}
             </h1>
 
+            {/* NEW: handler + followers */}
+            {isPublicView && (
+              <div style={{ fontSize: 13, color: "#aaa", marginBottom: 6 }}>
+                @{profile?.handle ?? profile?.displayName?.toLowerCase()?.replace(/\s+/g, "")}
+                {" · "}
+                {followerCount} followers
+              </div>
+            )}
 
+            {/* Existing trip info / bio */}
             {selectedTripId ? (
               <>
-                {/* compact trip meta line */}
                 <div className="muted" style={{ fontSize: 13, marginBottom: 4 }}>
-                  @{profile?.handle ?? profile?.displayName?.toLowerCase()?.replace(/\s+/g, "")}
-                  {tripStartLocation || tripDestination ? ` · ${tripStartLocation || "—"} → ${tripDestination || "—"}` : ""}
-                  {(tripStart || tripEnd) ? ` · ${tripStart}${tripEnd ? ` → ${tripEnd}` : ""}` : ""}
+                  {tripStartLocation || tripDestination
+                    ? ` ${tripStartLocation || "—"} → ${tripDestination || "—"}`
+                    : ""}
+                  {(tripStart || tripEnd)
+                    ? ` · ${tripStart}${tripEnd ? ` → ${tripEnd}` : ""}`
+                    : ""}
                 </div>
 
-                {/* notes snippet */}
                 {tripNotes && (
-                  <div className="muted" style={{ fontSize: 13, marginTop: 4, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
+                  <div
+                    className="muted"
+                    style={{ fontSize: 13, marginTop: 4, lineHeight: 1.5, whiteSpace: "pre-wrap" }}
+                  >
                     {tripNotes}
                   </div>
-
                 )}
               </>
             ) : (
@@ -1188,14 +1495,20 @@ export default function Travel() {
                 <div className="muted" style={{ fontSize: 13 }}>{profile?.bio}</div>
               ) : (
                 <>
-                  <div className="muted" style={{ fontSize: 13 }}>{tripStart} {tripEnd ? `→ ${tripEnd}` : ""}</div>
-                  <div className="muted" style={{ fontSize: 12 }}>{useFirebase ? (firebaseReady ? "Connected to Firebase" : "Connecting...") : "Local-only mode (no Firebase configured)"}</div>
+                  <div className="muted" style={{ fontSize: 13 }}>
+                    {tripStart} {tripEnd ? `→ ${tripEnd}` : ""}
+                  </div>
+                  <div className="muted" style={{ fontSize: 12 }}>
+                    {useFirebase
+                      ? (firebaseReady ? "Connected to Firebase" : "Connecting...")
+                      : "Local-only mode (no Firebase configured)"}
+                  </div>
                 </>
               )
             )}
-
           </div>
 
+          {/* Right side buttons */}
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {!isPublicView && (
               <>
@@ -1205,11 +1518,49 @@ export default function Travel() {
               </>
             )}
 
-            <button onClick={() => { /* exportTrips implementation */ }} className="btn-export">Export all</button>
-            {isPublicView && <button onClick={() => { /* shareProfile implementation */ }} className="btn-start">Share profile</button>}
+            {isPublicView && resolvedUid && user && resolvedUid !== user.uid && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (followLoading) return;
+                  toggleFollow();
+                }}
+                className={`btn-text-follow ${isFollowing ? "following" : ""}`}
+                title={isFollowing ? "Unfollow" : "Follow"}
+                aria-pressed={isFollowing}
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: 0,
+                  color: isFollowing ? "#e63946" : "var(--link-color, #0077b6)",
+                  cursor: followLoading ? "default" : "pointer",
+                  fontSize: "14px",
+                  fontWeight: 500,
+                  textDecoration: isFollowing ? "none" : "none",
+                  opacity: followLoading ? 0.7 : 1,
+                }}
+              >
+                {followLoading ? "..." : (isFollowing ? "Following" : "Follow")}
+              </button>
 
+            )}
 
-            {/* Edit Trip button (owner-only) */}
+            {/* Share profile */}
+            {isPublicView && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  safeShare({
+                    url: window.location.href,
+                    title: profile?.displayName || `@${profile?.handle}`,
+                    text: `Check out this trip on MyApp`,
+                    onToast: (msg, type) => setToast({ msg, type })
+                  });
+                }}
+                aria-label="Share profile"
+              >Share</button>
+            )}
+
             {selectedTrip && user && (selectedTrip.ownerId === user.uid || selectedTrip.owner_id === user.uid) && (
               <button
                 onClick={() => openEditModal(selectedTrip)}
@@ -1221,356 +1572,58 @@ export default function Travel() {
               </button>
             )}
           </div>
-
-
         </div>
       </header>
 
-
-      <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 18, marginTop: 16 }}>
-        <aside style={{ minHeight: 320 }}>
-          <div className="section">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h3>Trips</h3>
-              <div className="muted" style={{ fontSize: 13 }}>{savedTrips.length}</div>
-            </div>
-            <div style={{ marginTop: 8 }}>
-              {savedTrips.length === 0 && <div className="muted">No saved trips.</div>}
-              <ul className="saved-trip-list">
-                {savedTrips.map((t) => {
-                  const isOwner = user && (t.ownerId === user.uid || t.owner_id === user.uid);
-                  const visibility = t.visibility || (t.private ? "private" : "public");
-                  // Determine icon and tooltip
-                  let icon = "🔒";
-                  let iconTitle = "Private (owner only)";
-                  if (visibility === "public") {
-                    icon = "🌐";
-                    iconTitle = "Public";
-                  } else if (visibility === "private" && !isOwner) {
-                    // If private but current user is in allowedUsers, show restricted icon
-                    if (Array.isArray(t.allowedUsers) && user && t.allowedUsers.includes(user.uid)) {
-                      icon = "🔑";
-                      iconTitle = "Restricted (you have access)";
-                    } else {
-                      icon = "🔒";
-                      iconTitle = "Private";
-                    }
-                  } else if (visibility === "private" && isOwner) {
-                    icon = "🔒";
-                    iconTitle = "Private (you own this)";
-                  }
-
-                  return (
-                    <li
-                      key={t.trip_id}
-                      className={`saved-trip ${selectedTripId === t.trip_id ? "active" : ""} compact`}
-                      onClick={() => loadTrip(t)}
-                      style={{ cursor: 'pointer', padding: '8px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                    >
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: 14, lineHeight: '1.2', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</div>
-                        <div className="muted" style={{ fontSize: 12, marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {t.startLocation || '—'}{t.destination ? ` → ${t.destination}` : ''}
-                        </div>
-                      </div>
-
-                      <div style={{ marginLeft: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
-                        {/* visibility icon */}
-                        <div title={iconTitle} aria-label={`visibility: ${iconTitle}`} style={{ fontSize: 18, opacity: 0.95 }}>
-                          {icon}
-                        </div>
-
-                        {!isPublicView && (
-                          <>
-                            {isOwner && (
-                              <button
-                                onClick={(e) => { e.stopPropagation(); openEditModal(t); }}
-                                className="btn-small btn-secondary"
-                                title="Edit trip"
-                                style={{ marginLeft: 6 }}
-                              >
-                                Edit
-                              </button>
-                            )}
-
-                            <button
-                              onClick={(e) => { e.stopPropagation(); setConfirmDelete({ open: true, id: t.trip_id }); }}
-                              className="btn-small btn-danger"
-                              title="Delete trip"
-                            >
-                              Del
-                            </button>
-                          </>
-                        )}
-
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          </div>
-
-          <div className="section" style={{ marginTop: 12 }}>
-            <h4>Storage</h4>
-            <p className="muted" style={{ fontSize: 13 }}>Trips are stored in {useFirebase ? "Firebase Firestore (per-user)" : "your app's memory"}.</p>
-          </div>
+      <div className="layout-grid">
+        <aside className="layout-sidebar">
+          <TripsList savedTrips={savedTrips} selectedTripId={selectedTripId} loadTrip={loadTrip} user={user} isPublicView={isPublicView} openEditModal={openEditModal} setConfirmDelete={setConfirmDelete} />
         </aside>
 
-        {/* RIGHT PANEL: show only when owner OR a trip is selected for viewing */}
         {(!isPublicView || Boolean(selectedTripId)) ? (
           <main>
-            {/* Show Google embed if present on the selected trip, otherwise fall back to live map / message */}
-            {(selectedTrip && selectedTrip.googleEmbed) ? (
-              <GoogleEmbedMap embedHtmlOrUrl={selectedTrip.googleEmbed} height={340} />
-            ) : (
-              <div className="map-box section" style={{ height: 340, position: "relative", cursor: "default" }}>
-                {position ? (
-                  <MapContainer center={[position.lat, position.lng]} zoom={11} style={{ height: "100%", borderRadius: 8 }}>
-                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                    <Marker position={[position.lat, position.lng]}>
-                      <Popup>
-                        Current location<br />
-                        {position.lat.toFixed(5)}, {position.lng.toFixed(5)}
-                      </Popup>
-                    </Marker>
-                  </MapContainer>
-                ) : (
-                  // clickable overlay when there's no GPS fix
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => {
-                      // open modal to paste Google map embed (only if a trip is selected)
-                      if (!selectedTrip) {
-                        setToast({ msg: "Select or create a trip first", type: "warning" });
-                        setTimeout(() => setToast(null), 2000);
-                        return;
-                      }
-                      // prefill input with any existing embed
-                      setGoogleEmbedInput(selectedTrip?.googleEmbed || "");
-                      setShowEmbedModal(true);
-                    }}
-                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.target.click(); } }}
-                    style={{
-                      height: "100%",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      flexDirection: "column",
-                      gap: 10,
-                      padding: 16,
-                      textAlign: "center",
-                      borderRadius: 8,
-                      cursor: "pointer",
-                      userSelect: "none"
-                    }}
-                    title="Click to add a Google map for this trip"
-                    aria-label="Add Google map embed for this trip"
-                  >
-                    <div className="muted" style={{ fontSize: 15 }}>
-                      No GPS fix yet — click "Start tracking"
-                    </div>
-
-                    <div style={{ fontSize: 13, color: "#666", maxWidth: 420 }}>
-                      Want to show a custom map instead? Click here to paste a Google Maps / My Maps embed URL or iframe.
-                    </div>
-
-                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setShowEmbedModal(true); setGoogleEmbedInput(selectedTrip?.googleEmbed || ""); }}
-                        className="btn-start"
-                        aria-label="Open map embed dialog"
-                      >
-                        Add / Paste Google map
-                      </button>
-
-                      {/* small inline hint for owners */}
-                      {selectedTrip && (!isPublicView || (user && (selectedTrip.ownerId === user.uid || selectedTrip.owner_id === user.uid))) && (
-                        <div style={{ alignSelf: "center", fontSize: 13, color: "#666" }}>Owners can save a map for this trip</div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
+            <MapPanel selectedTrip={selectedTrip} position={position} setShowEmbedModal={setShowEmbedModal} setGoogleEmbedInput={setGoogleEmbedInput} isPublicView={isPublicView} user={user} setToast={setToast} />
 
             <div style={{ display: "flex", gap: 20, marginTop: 18, flexWrap: "wrap" }}>
               <div style={{ flex: 2, minWidth: 320 }}>
-                {/* Merged Live / View UI (replace old Live Stream block with this) */}
-                {/* Simplified Live Video block: single video area or message */}
-                {/* Simplified Live Video block with owner button */}
-                <section className="section">
-                  <h2>Live Video</h2>
-
-                  <div style={{ marginTop: 12 }}>
-                    {selectedTrip?.youtubeId ? (
-                      <div style={{ height: 340 }}>
-                        <iframe
-                          title="YouTube Live"
-                          src={`https://www.youtube.com/embed/${selectedTrip.youtubeId}?autoplay=1`}
-                          width="100%"
-                          height="100%"
-                          style={{ border: 0 }}
-                          allowFullScreen
-                          loading="lazy"
-                        />
-                      </div>
-                    ) : (
-                      <div
-                        className="map-box section"
-                        style={{
-                          height: 340,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          textAlign: "center",
-                          padding: 16,
-                          cursor: isOwner ? "pointer" : "default",
-                          userSelect: "none",
-                        }}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => { if (isOwner) openYoutubeModal(selectedTrip?.youtubeId ? `https://www.youtube.com/watch?v=${selectedTrip.youtubeId}` : ""); }}
-                        onKeyDown={(e) => { if (isOwner && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openYoutubeModal(selectedTrip?.youtubeId ? `https://www.youtube.com/watch?v=${selectedTrip.youtubeId}` : ""); } }}
-                        aria-label="Attach YouTube live link"
-                        title={isOwner ? "Attach YouTube live link" : "No live feed attached"}
-                      >
-                        <div style={{ maxWidth: 480 }}>
-                          <div style={{ fontSize: 16 }} className="muted">No live feed attached</div>
-                          <div style={{ marginTop: 8, color: "#666" }}>
-                            {isOwner ? "Attach a YouTube watch URL or iframe to this trip to show a live stream." : "Owner hasn't attached a live stream yet."}
-                          </div>
-
-                          {isOwner && (
-                            <div style={{ marginTop: 14 }}>
-                              <button
-                                className="btn-start"
-                                onClick={(e) => { e.stopPropagation(); openYoutubeModal(selectedTrip?.youtubeId ? `https://www.youtube.com/watch?v=${selectedTrip.youtubeId}` : ""); }}
-                              >
-                                Attach YouTube link
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </section>
+                <LiveVideoPanel selectedTrip={selectedTrip} isOwner={isOwner} applyLocalEdit={applyLocalEdit} user={user} db={db} useFirebase={useFirebase} setToast={setToast} />
 
 
-
-
-                <section className="section">
-                  <h2>Gallery (Photos & Videos)</h2>
-                  {!isPublicView && <input type="file" accept="image/*,video/*" multiple onChange={handleMediaSelected} />}
-                  <div className="gallery" style={{ marginTop: 12 }}>
-                    {media.map((m) => (
-                      <div key={m.id} className="gallery-item">
-                        {m.type === "image" ? <img src={m.url} alt={m.name} /> : <video src={m.url} controls className="media-preview" />}
-                        <div className="info">
-                          <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "75%" }}>{m.name}</div>
-                          {!isPublicView && <button onClick={() => removeMedia(m.id)} className="btn-link-danger">Remove</button>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </section>
               </div>
 
-              <aside style={{ flex: 1, minWidth: 260 }}>
-                <div className="section">
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <h3>Itinerary</h3>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      {canEditItinerary && (
-                        <button
-                          onClick={() => setShowItineraryModal(true)}
-                          className="btn-start"
-                          style={{ fontSize: "14px", padding: "4px 10px" }}
-                        >
-                          Add
-                        </button>
-                      )}
-                    </div>
-                  </div>
+              <div style={{ width: 320, minWidth: 280, display: "flex", flexDirection: "column", gap: 12 }}>
+                {/* Compact live map (moved above Itinerary) */}
+                <LiveLocationPanel
+                  db={db}
+                  selectedTrip={selectedTrip}
+                  currentUserId={user?.uid}
+                  compact={true}
+                  mapHeight="220px"
+                  mapZoom={16}
+                />
 
-
-                  <ul className="itinerary" style={{ marginTop: 12 }}>
-                    {itinerary.length === 0 && <li className="muted">No itinerary items yet.</li>}
-                    {itinerary.map((it, idx) => (
-                      <li
-                        key={it.id || idx}
-                        style={{
-                          marginBottom: 8,
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "flex-start",
-                          gap: 8,
-                        }}
-                      >
-                        <div style={{ flex: 1 }}>
-                          <div className="place">Day {it.day || idx + 1}: {it.route || it.place}</div>
-                          {it.distance && <div className="date">{it.distance}</div>}
-                          {it.notes && <div className="notes">{it.notes}</div>}
-                        </div>
-
-                        {canEditItinerary && (
-                          <div style={{ marginLeft: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); confirmDeleteItinerary(it.id || null, it.route || `Day ${idx + 1}`); }}
-                              className="btn-icon"
-                              title="Delete itinerary item"
-                              aria-label="Delete itinerary item"
-                            >
-                              {/* trash icon SVG (16x16) */}
-                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
-                                <path d="M3 6h18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                                <path d="M10 11v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                                <path d="M14 11v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                              </svg>
-                            </button>
-
-                          </div>
-                        )}
-                      </li>
-                    ))}
-
-                  </ul>
-                </div>
-              </aside>
+                {/* Itinerary sits below the compact live map */}
+                <ItineraryPanel itinerary={itinerary} canEditItinerary={canEditItinerary} setShowItineraryModal={setShowItineraryModal} confirmDeleteItinerary={confirmDeleteItinerary} />
+              </div>
+              <GalleryPanel
+                media={media}
+                setMedia={setMedia}
+                isPublicView={isPublicView}
+              />
             </div>
           </main>
+
         ) : (
           <div className="section" style={{ minHeight: 380, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <div style={{ textAlign: "center", maxWidth: 460 }}>
-              <h2 style={{ marginBottom: 10, fontSize: "1.5rem", fontWeight: 600 }}>
-                {isPublicView ? "Select a trip to view" : "No trip selected"}
-              </h2>
-              <p
-                className="muted"
-                style={{
-                  marginBottom: 20,
-                  fontSize: 15,
-                  lineHeight: 1.5,
-                  maxWidth: 400,
-                  marginLeft: "auto",
-                  marginRight: "auto",
-                }}
-              >
-                {isPublicView
-                  ? "This profile has trips on the left. Pick one to load its map, live stream, gallery and itinerary."
-                  : "Pick a trip from the list on the left or create a new trip to begin tracking and broadcasting."}
+              <h2 style={{ marginBottom: 10, fontSize: "1.5rem", fontWeight: 600 }}>{isPublicView ? "Select a trip to view" : "No trip selected"}</h2>
+              <p className="muted" style={{ marginBottom: 20, fontSize: 15, lineHeight: 1.5, maxWidth: 400, marginLeft: "auto", marginRight: "auto" }}>
+                {isPublicView ? "This profile has trips on the left. Pick one to load its map, live stream, gallery and itinerary." : "Pick a trip from the list on the left or create a new trip to begin tracking and broadcasting."}
               </p>
 
               {!isPublicView && (
                 <div style={{ display: "flex", justifyContent: "center" }}>
-                  <button className="btn-start" onClick={() => createLocalTrip({ title: "My New Trip" })}>
-                    Create new trip
-                  </button>
+                  <button className="btn-start" onClick={() => createLocalTrip({ title: "My New Trip" })}>Create new trip</button>
                 </div>
               )}
             </div>
@@ -1579,73 +1632,42 @@ export default function Travel() {
       </div>
 
       {showItineraryModal && (
-        // show trip title in modal header for clarity (fallback to selectedTrip.title or tripTitle)
         <Modal title={`Add Itinerary — ${selectedTrip?.title || tripTitle || "Untitled Trip"}`} onClose={() => setShowItineraryModal(false)}>
-          <AddItineraryForm
-            tripTitle={selectedTrip?.title || tripTitle || "Untitled Trip"}
-            onAdd={(item) => { addItinerary(item); setShowItineraryModal(false); }}
-            onCancel={() => setShowItineraryModal(false)}
-          />
+          <AddItineraryForm tripTitle={selectedTrip?.title || tripTitle || "Untitled Trip"} onAdd={(item) => { addItinerary(item); setShowItineraryModal(false); }} onCancel={() => setShowItineraryModal(false)} />
         </Modal>
       )}
 
-      {/* Edit trip modal (owner only) */}
       {showEditModal && tripToEdit && (
         <EditTripModal
           trip={tripToEdit}
           open={showEditModal}
           saving={savingEdit}
-          onCancel={() => {
-            setShowEditModal(false);
-            setTripToEdit(null);
-          }}
+          onCancel={() => { setShowEditModal(false); setTripToEdit(null); }}
           onSave={handleSaveEdit}
+          db={db}                                 // <-- give modal access to Firestore client
+          ownerUid={user?.uid || null}            // <-- exclude owner from allowedUsers textarea
+          resolveHandleToUid={resolveHandleToUidLocal}
+          resolveUidToHandle={resolveUidToHandleLocal}
         />
       )}
 
-      {/* Google Embed Modal (open when user clicks the no-gps area or Save map in header) */}
       {showEmbedModal && (
         <Modal title={`Add Google Map — ${selectedTrip?.title || "Trip"}`} onClose={() => setShowEmbedModal(false)}>
           <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 320 }}>
             <div style={{ fontSize: 13, color: "#555" }}>Paste the iframe HTML or the embed URL from Google My Maps / Google Maps:</div>
-            <input
-              placeholder={`Paste iframe or src URL (e.g. <iframe src="..."> or https://www.google.com/maps/d/.../embed)`}
-              value={googleEmbedInput}
-              onChange={(e) => setGoogleEmbedInput(e.target.value)}
-              style={{ width: "100%", padding: "8px 10px", fontSize: 14 }}
-            />
+            <input placeholder={`Paste iframe or src URL (e.g. <iframe src="..."> or https://www.google.com/maps/d/.../embed)`} value={googleEmbedInput} onChange={(e) => setGoogleEmbedInput(e.target.value)} style={{ width: "100%", padding: "8px 10px", fontSize: 14 }} />
 
-            {/* preview area if the input yields a src */}
             {extractEmbedSrc(googleEmbedInput) ? (
               <div style={{ border: "1px solid #eee", borderRadius: 6, overflow: "hidden", height: 200 }}>
-                <iframe
-                  title="Map preview"
-                  src={extractEmbedSrc(googleEmbedInput)}
-                  width="100%"
-                  height="100%"
-                  style={{ border: 0 }}
-                  loading="lazy"
-                  referrerPolicy="no-referrer-when-downgrade"
-                />
+                <iframe title="Map preview" src={extractEmbedSrc(googleEmbedInput)} width="100%" height="100%" style={{ border: 0 }} loading="lazy" referrerPolicy="no-referrer-when-downgrade" />
               </div>
             ) : (
-              <div className="muted" style={{ fontSize: 13 }}>
-                Paste a Google My Maps embed iframe or a Google Maps embed URL to see a preview here.
-              </div>
+              <div className="muted" style={{ fontSize: 13 }}>Paste a Google My Maps embed iframe or a Google Maps embed URL to see a preview here.</div>
             )}
 
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button className="btn-cancel" onClick={() => setShowEmbedModal(false)}>Cancel</button>
-              <button
-                className="btn-start"
-                onClick={async () => {
-                  // call your existing save helper
-                  await saveGoogleEmbedForSelectedTrip();
-                  setShowEmbedModal(false);
-                }}
-              >
-                Save map
-              </button>
+              <button className="btn-start" onClick={async () => { await saveGoogleEmbedForSelectedTrip(); setShowEmbedModal(false); }}>Save map</button>
             </div>
           </div>
         </Modal>
@@ -1661,7 +1683,6 @@ export default function Travel() {
         </Modal>
       )}
 
-      {/* Confirm delete itinerary item modal */}
       {confirmItin.open && (
         <Modal title="Delete itinerary item?" onClose={() => setConfirmItin({ open: false, id: null, title: null })}>
           <p>Are you sure you want to delete <strong>{confirmItin.title || "this item"}</strong> from the itinerary? This action cannot be undone.</p>
@@ -1671,119 +1692,6 @@ export default function Travel() {
           </div>
         </Modal>
       )}
-
-      {confirmRemoveYoutube && (
-        <Modal title="Remove YouTube link?" onClose={() => setConfirmRemoveYoutube(false)}>
-          <p>Are you sure you want to remove the attached YouTube live link from this trip?</p>
-          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-            <button
-              className="btn-danger"
-              onClick={() => {
-                clearYouTubeFromTrip(); // run your removal logic
-                setConfirmRemoveYoutube(false);
-              }}
-            >
-              Remove
-            </button>
-            <button className="btn-cancel" onClick={() => setConfirmRemoveYoutube(false)}>Cancel</button>
-          </div>
-        </Modal>
-      )}
-
-      {showYoutubeModal && (
-        <Modal title={`Attach YouTube Live — ${selectedTrip?.title || "Trip"}`} onClose={() => setShowYoutubeModal(false)}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 320 }}>
-            <div style={{ fontSize: 13, color: "#555" }}>Paste the YouTube watch URL (https://www.youtube.com/watch?v=...) or an iframe embed code:</div>
-            <input
-              placeholder={`Paste YouTube watch link or iframe (e.g. <iframe src="https://www.youtube.com/embed/..." />)`}
-              value={youtubeInput}
-              onChange={(e) => setYoutubeInput(e.target.value)}
-              style={{ width: "100%", padding: "8px 10px", fontSize: 14 }}
-            />
-
-            {/* preview if we can extract an id */}
-            {extractYouTubeId(youtubeInput) ? (
-              <div style={{ border: "1px solid #eee", borderRadius: 6, overflow: "hidden", height: 200 }}>
-                <iframe
-                  title="YouTube preview"
-                  src={`https://www.youtube.com/embed/${extractYouTubeId(youtubeInput)}?autoplay=1`}
-                  width="100%"
-                  height="100%"
-                  style={{ border: 0 }}
-                  loading="lazy"
-                  allowFullScreen
-                />
-              </div>
-            ) : (
-              <div className="muted" style={{ fontSize: 13 }}>
-                Paste a YouTube watch URL or iframe to see a preview here.
-              </div>
-            )}
-
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button className="btn-cancel" onClick={() => setShowYoutubeModal(false)}>Cancel</button>
-              <button
-                className="btn-start"
-                onClick={async () => {
-                  await saveYouTubeToTrip();
-                  setShowYoutubeModal(false);
-                }}
-                disabled={savingYouTube}
-              >
-                {savingYouTube ? "Saving..." : "Save to trip"}
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-
-    </div>
-  );
-}
-
-/* ---------- AddItineraryForm (updated to show trip title) ---------- */
-function AddItineraryForm({ onAdd, onCancel, tripTitle }) {
-  const [day, setDay] = useState("");
-  const [route, setRoute] = useState("");
-  const [distance, setDistance] = useState("");
-  const [notes, setNotes] = useState("");
-
-  const submit = (e) => {
-    e.preventDefault();
-    if (!route) return;
-    onAdd({
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      day: day || String(Date.now()).slice(-4),
-      route,
-      distance,
-      notes,
-      date: new Date().toISOString(),
-    });
-    setDay("");
-    setRoute("");
-    setDistance("");
-    setNotes("");
-  };
-
-  return (
-    <div>
-      {/* Visible trip title inside modal so user knows which trip they're editing */}
-      <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 13, color: "#555", marginBottom: 4 }}>Adding itinerary for</div>
-        <div style={{ fontSize: 16, fontWeight: 600 }}>{tripTitle}</div>
-      </div>
-
-      <form onSubmit={submit} className="itinerary-form">
-        <input placeholder="Day Number" value={day} onChange={(e) => setDay(e.target.value)} />
-        <input placeholder="Route (e.g., Raipur → Delhi)" value={route} onChange={(e) => setRoute(e.target.value)} />
-        <input placeholder="Distance (e.g., 1,220 km)" value={distance} onChange={(e) => setDistance(e.target.value)} />
-        <textarea placeholder="Notes (stops, sightseeing, etc.)" value={notes} onChange={(e) => setNotes(e.target.value)} />
-        <div className="modal-actions">
-          <button type="button" className="btn-cancel" onClick={onCancel}>Cancel</button>
-          <button type="submit" className="btn-save">Save</button>
-        </div>
-      </form>
     </div>
   );
 }

@@ -1,21 +1,246 @@
+/* ---------- Theme variables (defaults) ---------- */
+/* You can override these variables elsewhere (e.g., :root or a theme wrapper) */
+:root {
+    /* general */
+    --bg: #ffffff;
+    --panel-bg: #f8fafc;
+    --text: #0f172a;
+    --muted: #6b7280;
+    --control-bg: #ffffff;
+    --control-text: #0f172a;
+    --control-radius: 8px;
+    --control-padding: 8px 10px;
+    --focus-ring: rgba(59, 130, 246, 0.25);
+
+    /* chips - resolved/loading/invalid */
+    --chip-resolved-bg: #e6f5eb;
+    --chip-resolved-text: #054e2b;
+    --chip-loading-bg: #eef3ff;
+    --chip-loading-text: #072243;
+    --chip-invalid-bg: #fff0f0;
+    --chip-invalid-text: #6b0f0f;
+
+    /* borders & accents */
+    --border: rgba(15, 23, 42, 0.06);
+    --soft-border: rgba(15, 23, 42, 0.04);
+}
+
+/* Dark theme: auto-apply on prefers-color-scheme or override with .dark-theme wrapper */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #0b1220;
+        --panel-bg: #061025;
+        --text: #e6eef6;
+        --muted: #9aa4b2;
+        --control-bg: rgba(255, 255, 255, 0.03);
+        --control-text: #e6eef6;
+        --control-radius: 8px;
+        --control-padding: 8px 10px;
+        --focus-ring: rgba(59, 130, 246, 0.25);
+
+        --chip-resolved-bg: #083d21;
+        /* dark green */
+        --chip-resolved-text: #dff3e6;
+        --chip-loading-bg: #061a3a;
+        --chip-loading-text: #dfeaff;
+        --chip-invalid-bg: #3a0f0f;
+        --chip-invalid-text: #ffdede;
+
+        --border: rgba(255, 255, 255, 0.06);
+        --soft-border: rgba(255, 255, 255, 0.04);
+    }
+}
+
+/* Optional explicit dark theme wrapper (use .dark-theme on a parent to force dark) */
+.dark-theme {
+    --bg: #0b1220;
+    --panel-bg: #061025;
+    --text: #e6eef6;
+    --muted: #9aa4b2;
+    --control-bg: rgba(255, 255, 255, 0.03);
+    --control-text: #e6eef6;
+
+    --chip-resolved-bg: #083d21;
+    --chip-resolved-text: #dff3e6;
+    --chip-loading-bg: #061a3a;
+    --chip-loading-text: #dfeaff;
+    --chip-invalid-bg: #3a0f0f;
+    --chip-invalid-text: #ffdede;
+
+    --border: rgba(255, 255, 255, 0.06);
+    --soft-border: rgba(255, 255, 255, 0.04);
+}
+
+/* Optional explicit light theme wrapper */
+.light-theme {
+    --bg: #ffffff;
+    --panel-bg: #f8fafc;
+    --text: #0f172a;
+    --muted: #6b7280;
+    --control-bg: #ffffff;
+    --control-text: #0f172a;
+
+    --chip-resolved-bg: #e6f5eb;
+    --chip-resolved-text: #054e2b;
+    --chip-loading-bg: #eef3ff;
+    --chip-loading-text: #072243;
+    --chip-invalid-bg: #fff0f0;
+    --chip-invalid-text: #6b0f0f;
+
+    --border: rgba(15, 23, 42, 0.06);
+    --soft-border: rgba(15, 23, 42, 0.04);
+}
+
+/* ---------- Container & form layout ---------- */
+.edit-trip-form {
+    background: var(--panel-bg);
+    color: var(--text);
+    padding: 14px;
+    border-radius: 12px;
+    box-sizing: border-box;
+}
+
 .edit-trip-form .field {
-    margin-bottom: 10px;
+    margin-bottom: 12px;
     display: block;
 }
 
 .edit-trip-form .label {
     font-size: 13px;
-    color: #666;
+    color: var(--muted);
     margin-bottom: 6px;
+    font-weight: 600;
 }
 
+/* controllers: inputs, textarea, select - borderless look, accessible focus ring */
 .edit-trip-form input,
 .edit-trip-form textarea,
 .edit-trip-form select {
     width: 100%;
-    padding: 8px 10px;
-    border-radius: 6px;
-    border: 1px solid #e0e0e0;
+    padding: var(--control-padding);
+    border-radius: var(--control-radius);
+    border: none;
+    outline: none;
+    background: var(--control-bg);
+    color: var(--control-text);
     font-size: 14px;
     box-sizing: border-box;
+    box-shadow: inset 0 1px 0 var(--soft-border);
+    transition: box-shadow 120ms ease, transform 120ms ease;
 }
+
+/* subtle lift on focus */
+.edit-trip-form input:focus,
+.edit-trip-form textarea:focus,
+.edit-trip-form select:focus {
+    box-shadow: 0 0 0 4px var(--focus-ring);
+    transform: translateY(-1px);
+}
+
+/* placeholders */
+.edit-trip-form ::placeholder {
+    color: var(--muted);
+    opacity: 0.9;
+}
+
+/* textarea autosize visual */
+.edit-trip-form textarea {
+    min-height: 72px;
+    resize: vertical;
+    line-height: 1.35;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+}
+
+/* modal action buttons container (keeps current spacing) */
+.modal-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    align-items: center;
+}
+
+/* small muted helper text */
+.muted {
+    color: var(--muted);
+}
+
+/* ---------- Handle chips (pill UI) ---------- */
+.handle-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: none;
+    /* no border by default */
+    background: var(--chip-loading-bg);
+    /* fallback */
+    color: var(--chip-loading-text);
+    font-weight: 600;
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06) inset;
+    transition: background 120ms ease, color 120ms ease, transform 120ms ease;
+    white-space: nowrap;
+}
+
+/* states */
+.handle-chip[data-state="resolved"] {
+    background: var(--chip-resolved-bg);
+    color: var(--chip-resolved-text);
+    transform: none;
+}
+
+.handle-chip[data-state="loading"] {
+    background: var(--chip-loading-bg);
+    color: var(--chip-loading-text);
+    opacity: 0.98;
+}
+
+.handle-chip[data-state="invalid"] {
+    background: var(--chip-invalid-bg);
+    color: var(--chip-invalid-text);
+}
+
+/* ensure wrapping when horizontal space is tight */
+.handle-chip-wrap {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+/* smaller chips on tiny screens */
+@media (max-width: 420px) {
+    .handle-chip {
+        padding: 4px 8px;
+        font-size: 13px;
+    }
+
+    .edit-trip-form {
+        padding: 10px;
+    }
+}
+
+/* ---------- Invalid tokens message ---------- */
+.invalid-tokens {
+    color: var(--chip-invalid-text);
+    margin-top: 8px;
+    font-size: 13px;
+}
+
+/* ---------- Utility tweaks ---------- */
+/* ensure code blocks / inline code in help text are readable */
+.edit-trip-form code {
+    background: rgba(0, 0, 0, 0.04);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: inherit;
+    font-size: 12px;
+}
+
+/* focus outline for keyboard users on clickable chips (if ever clickable) */
+.handle-chip:focus {
+    outline: none;
+    box-shadow: 0 0 0 4px var(--focus-ring);
+}
+
+/* if you want to force light or dark, add .light-theme or .dark-theme to a higher-level wrapper */

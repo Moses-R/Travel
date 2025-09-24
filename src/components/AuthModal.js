@@ -1,4 +1,3 @@
-// src/components/AuthModal.jsx (edited to avoid auto-show on mount)
 import React, { useEffect, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { normalizeHandle } from "../utils/handle";
@@ -13,7 +12,7 @@ export default function AuthModal({ onClose }) {
     signupOrLoginWithGoogle,
     sendPhoneOtp,
     verifyPhoneOtp,
-    createPublicProfileWithHandle, // alias to claimHandle (transactional)
+    createPublicProfileWithHandle,
     checkHandleAvailabilityCallable,
     refreshProfile,
     logout,
@@ -42,6 +41,12 @@ export default function AuthModal({ onClose }) {
 
   const handleDebounceRef = useRef(null);
 
+  // refs for accessibility & focus management
+  const overlayRef = useRef(null);
+  const dialogRef = useRef(null);
+  const firstFocusableRef = useRef(null);
+  const lastFocusableRef = useRef(null);
+
   // Cleanup recaptcha on unmount
   useEffect(() => {
     return () => {
@@ -49,20 +54,17 @@ export default function AuthModal({ onClose }) {
         try {
           window.recaptchaVerifier.clear?.();
           window.recaptchaVerifier = null;
-        } catch (e) {}
+        } catch (e) { }
       }
     };
   }, []);
 
   // -----------------------
   // IMPORTANT CHANGE:
-  // Remove the auto-show-on-mount effect that used:
-  //    if (currentUser && profile && !profile.handle) setShowHandleStep(true);
-  // We DO NOT auto-open on mount. Instead we only open in afterAuthSuccess (post-signup)
-  // or when refreshProfile proves the user has no handle.
+  // Remove auto-show on mount; only open afterAuthSuccess or based on refreshProfile
   // -----------------------
 
-  // Normalize & debounce availability check (unchanged)
+  // Normalize & debounce availability check (unchanged but we disallow Save until available)
   useEffect(() => {
     const n = normalizeHandle(handleInput || "");
     setHandleNormalized(n);
@@ -103,10 +105,7 @@ export default function AuthModal({ onClose }) {
 
   const close = () => {
     setError("");
-    setEmail("");
-    setPassword("");
-    setName("");
-    setPhone("");
+    // Preserve signup fields so user can retry quickly; only clear OTP & handle step state when fully closing
     setOtpCode("");
     setOtpSent(false);
     setShowHandleStep(false);
@@ -115,6 +114,35 @@ export default function AuthModal({ onClose }) {
     setHandleAvailable(null);
     if (onClose) onClose();
   };
+
+  // Focus trapping and Escape handling
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        close();
+      }
+      if (e.key === "Tab") {
+        // basic focus trap
+        const focusable = dialogRef.current?.querySelectorAll(
+          'a, button, textarea, input, select, [tabindex]:not([tabindex="-1"])'
+        );
+        if (!focusable || focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, []);
 
   // -----------------------
   // afterAuthSuccess: central place to decide whether to show handle step
@@ -129,22 +157,18 @@ export default function AuthModal({ onClose }) {
       return;
     }
 
-    // If not obviously new, do a defensive refresh of profile to confirm server state
-    // (this avoids popup if the server already has a handle)
+    // Defensive refresh
     if (typeof refreshProfile === "function") {
       try {
         const refreshed = await refreshProfile();
-        // If profile exists and has no handle, show handle step
         if (refreshed && !refreshed.handle) {
           setShowHandleStep(true);
           setHandleInput(displayName ? displayName.split(" ")[0] : "");
           return;
         }
-        // If refreshed profile has handle (or refresh returned null), treat as returning user -> close modal
         close();
         return;
       } catch (e) {
-        // If refresh failed, be conservative: show handle step so new users aren't blocked
         console.warn("[AuthModal] refreshProfile failed in afterAuthSuccess", e);
         setShowHandleStep(true);
         setHandleInput(displayName ? displayName.split(" ")[0] : "");
@@ -152,7 +176,7 @@ export default function AuthModal({ onClose }) {
       }
     }
 
-    // Fallback: if we can't refresh, only show handle step if profile exists and has no handle
+    // fallback
     if (currentUser && profile && !profile.handle) {
       setShowHandleStep(true);
       setHandleInput(displayName ? displayName.split(" ")[0] : "");
@@ -177,7 +201,7 @@ export default function AuthModal({ onClose }) {
       }
     } catch (err) {
       console.error("[AuthModal] email auth error", err);
-      setError(err?.message || "Auth error");
+      setError(err?.message || "Auth error — please check your credentials.");
     } finally {
       setLoading(false);
     }
@@ -236,6 +260,17 @@ export default function AuthModal({ onClose }) {
     }
   };
 
+  // generate a few handle suggestions
+  const generateHandleSuggestions = () => {
+    const base = normalizeHandle(name || handleInput || "you") || "user";
+    const suggestions = [];
+    for (let i = 0; i < 4; i++) {
+      const suffix = i === 0 ? "" : Math.floor(Math.random() * 900 + 100).toString();
+      suggestions.push((base + suffix).slice(0, 30));
+    }
+    return suggestions;
+  };
+
   // Claim handle
   const handleClaimHandle = async () => {
     setError("");
@@ -260,12 +295,20 @@ export default function AuthModal({ onClose }) {
 
       setShowHandleStep(false);
       close();
+
+      // copy to clipboard for convenience (best effort)
+      try {
+        await navigator.clipboard.writeText(`@${res.handle}`);
+      } catch (err) {
+        // ignore if not allowed
+      }
+
       window.location.href = `/@${res.handle}`;
     } catch (err) {
       console.error("[AuthModal] createPublicProfileWithHandle failed", err);
       if (err?.code === "already-exists") {
         if (profile?.handle && profile.handle === normalized) {
-          // idempotent success: user already owns the handle
+          // idempotent success
           setShowHandleStep(false);
           close();
           window.location.href = `/@${normalized}`;
@@ -291,55 +334,145 @@ export default function AuthModal({ onClose }) {
     close();
   };
 
+  // copy handle helper
+  const copyHandle = async () => {
+    if (!handleNormalized) return;
+    try {
+      await navigator.clipboard.writeText(`@${handleNormalized}`);
+    } catch (e) {
+      // fallback: select and let user copy
+      setError("Copy not allowed by browser — please copy manually.");
+    }
+  };
+
+  // overlay click: be careful not to close when user is mid-handle-claim
+  const onOverlayMouseDown = (e) => {
+    // if click outside dialog, close only when not in critical step or confirmation
+    if (!dialogRef.current) return;
+    if (!dialogRef.current.contains(e.target)) {
+      // if currently entering handle and has unsaved input, don't close — treat as friendly guard
+      if (showHandleStep && (handleInput || checkingHandle || loading)) {
+        setError("Press 'Skip for now' or save your handle before closing.");
+        return;
+      }
+      close();
+    }
+  };
+
   return (
-    <div className="auth-modal-overlay" onMouseDown={close}>
-      <div className="auth-modal" onMouseDown={(e) => e.stopPropagation()}>
-        <button className="auth-close" onClick={close}>
+    <div
+      className="auth-modal-overlay"
+      onMouseDown={onOverlayMouseDown}
+      ref={overlayRef}
+      aria-hidden={false}
+    >
+      <div
+        className="auth-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="auth-modal-title"
+        onMouseDown={(e) => e.stopPropagation()}
+        ref={dialogRef}
+      >
+        <button
+          className="auth-close"
+          onClick={close}
+          aria-label="Close authentication dialog"
+          title="Close"
+        >
           &times;
         </button>
 
         <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <button className={`tab ${section === "email" ? "active" : ""}`} onClick={() => setSection("email")}>
+          <button
+            className={`tab ${section === "email" ? "active" : ""}`}
+            onClick={() => setSection("email")}
+            aria-pressed={section === "email"}
+          >
             Email
           </button>
-          <button className={`tab ${section === "phone" ? "active" : ""}`} onClick={() => setSection("phone")}>
+          <button
+            className={`tab ${section === "phone" ? "active" : ""}`}
+            onClick={() => setSection("phone")}
+            aria-pressed={section === "phone"}
+          >
             Phone
           </button>
         </div>
 
         {showHandleStep ? (
           <div>
-            <h3>Create your public handle</h3>
+            <h3 id="auth-modal-title">Create your public handle</h3>
             <div style={{ marginBottom: 8 }}>
+              <label htmlFor="handle-input" className="auth-hint">
+                Choose a short, memorable handle people will use to find you.
+              </label>
               <input
+                id="handle-input"
                 placeholder="Choose a handle (letters, numbers, hyphens)"
                 value={handleInput}
                 onChange={(e) => setHandleInput(e.target.value)}
                 autoFocus
+                aria-describedby="handle-status"
               />
-              <div style={{ marginTop: 6, fontSize: 13 }}>
+              <div id="handle-status" className="handle-status" style={{ marginTop: 6 }}>
                 {checkingHandle ? (
-                  <span>Checking availability…</span>
+                  <span className="inline-spin">Checking availability…</span>
                 ) : handleNormalized ? (
                   handleAvailable ? (
-                    <span style={{ color: "green" }}>@{handleNormalized} is available</span>
+                    <span className="handle-success">@{handleNormalized} is available</span>
                   ) : (
-                    <span style={{ color: "red" }}>@{handleNormalized} is taken</span>
+                    <span className="handle-error">@{handleNormalized} is taken</span>
                   )
                 ) : (
-                  <span>Enter a handle to check availability</span>
+                  <span className="muted">Enter a handle to check availability</span>
                 )}
+              </div>
+            </div>
+
+            <div className="suggestions-row" style={{ marginBottom: 8 }}>
+              <div className="auth-hint" style={{ marginBottom: 6 }}>
+                Suggestions:
+              </div>
+              <div className="suggestions">
+                {generateHandleSuggestions().map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    className="suggestion-btn"
+                    onClick={() => setHandleInput(s)}
+                    title={`Use @${s}`}
+                  >
+                    @{s}
+                  </button>
+                ))}
               </div>
             </div>
 
             {error && <div className="auth-error">{error}</div>}
 
-            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-              <button className="btn primary" onClick={handleClaimHandle} disabled={loading}>
-                {loading ? "Saving…" : "Save handle"}
+            <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center" }}>
+              <button
+                className="btn primary"
+                onClick={handleClaimHandle}
+                disabled={loading || checkingHandle || !handleAvailable}
+                aria-disabled={loading || checkingHandle || !handleAvailable}
+                title={handleAvailable ? "Save handle" : "Save disabled until handle is available"}
+              >
+                {loading ? <span className="btn-loading" aria-hidden /> : "Save handle"}
               </button>
+
               <button className="btn" onClick={skipHandleStep} disabled={loading}>
                 Skip for now
+              </button>
+
+              <button
+                className="btn ghost"
+                onClick={copyHandle}
+                disabled={!handleNormalized}
+                title={handleNormalized ? `Copy @${handleNormalized}` : "No handle to copy"}
+              >
+                {handleNormalized ? `Copy @${handleNormalized}` : "Copy"}
               </button>
             </div>
           </div>
@@ -348,21 +481,43 @@ export default function AuthModal({ onClose }) {
             {section === "email" ? (
               <>
                 <div style={{ marginBottom: 8, display: "flex", gap: 8 }}>
-                  <button className={`small-tab ${mode === "login" ? "active" : ""}`} onClick={() => setMode("login")}>
+                  <button
+                    className={`small-tab ${mode === "login" ? "active" : ""}`}
+                    onClick={() => setMode("login")}
+                  >
                     Login
                   </button>
-                  <button className={`small-tab ${mode === "signup" ? "active" : ""}`} onClick={() => setMode("signup")}>
+                  <button
+                    className={`small-tab ${mode === "signup" ? "active" : ""}`}
+                    onClick={() => setMode("signup")}
+                  >
                     Signup
                   </button>
                 </div>
 
                 <form className="auth-form" onSubmit={handleEmailSubmit}>
                   {mode === "signup" && (
-                    <input placeholder="Full name (optional)" value={name} onChange={(e) => setName(e.target.value)} />
+                    <input
+                      placeholder="Full name (optional)"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                    />
                   )}
 
-                  <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-                  <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+                  <input
+                    type="email"
+                    placeholder="Email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                  />
+                  <input
+                    type="password"
+                    placeholder="Password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                  />
 
                   {error && <div className="auth-error">{error}</div>}
 
@@ -377,10 +532,25 @@ export default function AuthModal({ onClose }) {
                 </form>
 
                 <div style={{ marginTop: 12 }}>
-                  <div style={{ marginBottom: 6, color: "#666", fontSize: 13 }}>Or continue with</div>
-                  <button className="btn google" onClick={handleGoogle} disabled={loading}>
-                    Continue with Google
+                  <div style={{ marginBottom: 6, color: "var(--muted-text)", fontSize: 13 }}>Or continue with</div>
+                  <button
+                    className="btn google"
+                    onClick={handleGoogle}
+                    disabled={loading}
+                    aria-label="Continue with Google"
+                    title="Continue with Google"
+                  >
+                    <span className="google-inner">
+                      <svg className="google-icon" width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                        <path fill="#EA4335" d="M9 6.6v2.4h4.2c-.18 1.14-.96 2.64-2.64 3.06L9 12.6c1.62 0 3.24-.84 4.02-2.16H9z" />
+                        <path fill="#34A853" d="M9 15c1.98 0 3.72-.66 5.04-1.8l-2.4-1.92C11.64 12.18 10.44 12.6 9 12.6 6.66 12.6 4.8 11.04 3.9 9l-2.4 1.8C2.88 13.86 5.64 15 9 15z" />
+                        <path fill="#4A90E2" d="M15.96 7.32H9v2.4h4.38c-.18.84-.66 1.62-1.44 2.16l2.4 1.92C17.76 12.66 18.9 10.2 18.9 9c0-.9-.18-1.62-.54-2.28z" />
+                        <path fill="#FBBC05" d="M3.9 9c0-.66.12-1.26.36-1.8L1.86 5.34C1.26 6.42 0.9 7.68 0.9 9s.36 2.58.96 3.66l2.4-1.8c-.24-.54-.36-1.14-.36-1.8z" />
+                      </svg>
+                      <span className="google-text">Continue with Google</span>
+                    </span>
                   </button>
+
                 </div>
               </>
             ) : (
@@ -388,7 +558,11 @@ export default function AuthModal({ onClose }) {
                 <div>
                   {!otpSent ? (
                     <>
-                      <input placeholder="Phone (E.164) e.g. +919999888777" value={phone} onChange={(e) => setPhone(e.target.value)} />
+                      <input
+                        placeholder="Phone (E.164) e.g. +919999888777"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                      />
                       {error && <div className="auth-error">{error}</div>}
                       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
                         <button className="btn primary" onClick={handleSendOtp} disabled={loading}>
@@ -401,7 +575,7 @@ export default function AuthModal({ onClose }) {
                     </>
                   ) : (
                     <>
-                      <div style={{ marginBottom: 8, color: "#444" }}>Enter the OTP sent to {phone}</div>
+                      <div style={{ marginBottom: 8, color: "var(--text)" }}>Enter the OTP sent to {phone}</div>
                       <input placeholder="Enter OTP" value={otpCode} onChange={(e) => setOtpCode(e.target.value)} />
                       {error && <div className="auth-error">{error}</div>}
                       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
@@ -415,7 +589,7 @@ export default function AuthModal({ onClose }) {
                     </>
                   )}
                 </div>
-                <div id="recaptcha-container" style={{ marginTop: 12 }}></div>
+                <div id="recaptcha-container" style={{ marginTop: 12 }} aria-hidden={false}></div>
               </>
             )}
           </>

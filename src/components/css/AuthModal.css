@@ -1,117 +1,410 @@
-/* src/components/AuthModal.css */
+/* AuthModal.css
+   Centralized theme tokens and consistent color usage to preserve legibility
+   across light, dark, and black themes.
+*/
+
+/* -------------------------
+   Theme variables (fallbacks)
+   ------------------------- */
+:root {
+  /* surfaces */
+  --surface: #ffffff;
+  /* modal background (light) */
+  --surface-2: #f6f7f9;
+  /* subtle secondary surface */
+  --muted-surface: #f3f4f6;
+
+  /* text */
+  --text: #0b1220;
+  /* primary text on light surfaces */
+  --muted-text: #6b7280;
+  /* secondary / placeholder */
+  --hint-text: #9aa0a6;
+
+  /* borders & accents */
+  --border: rgba(2, 6, 23, 0.06);
+  --accent: #16a34a;
+  /* green accent */
+  --accent-contrast: #ffffff;
+
+  /* google button tokens */
+  --google-bg: rgba(0, 0, 0, 0.04);
+  --google-text: #0b1220;
+
+  /* misc */
+  --radius: 12px;
+  --card-shadow: 0 20px 50px rgba(2, 6, 23, 0.12);
+  --focus-ring: rgba(37, 99, 235, 0.18);
+  --error: #dc2626;
+}
+
+/* -------------------------
+   Base structure & overlay
+   ------------------------- */
 .auth-modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.45);
+  background: rgba(6, 10, 16, 0.6);
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1200;
+  z-index: 1400;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .auth-modal {
-  background: white;
-  width: 420px;
-  max-width: 92%;
-  border-radius: 10px;
-  padding: 18px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+  width: 560px;
+  max-width: 96%;
+  background: var(--surface);
+  border-radius: calc(var(--radius) + 4px);
+  padding: 26px;
+  box-shadow: var(--card-shadow);
+  border: 1px solid var(--border);
+  color: var(--text);
   position: relative;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  box-sizing: border-box;
+  transform-origin: center;
+  animation: modalRise 200ms cubic-bezier(.2, .9, .2, 1);
+  min-height: 200px;
 }
 
+@keyframes modalRise {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(.996);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* -------------------------
+   Close button
+   ------------------------- */
 .auth-close {
   position: absolute;
-  right: 12px;
-  top: 10px;
+  right: 18px;
+  top: 16px;
   background: transparent;
   border: none;
-  font-size: 22px;
+  font-size: 20px;
+  color: var(--muted-text);
+  padding: 8px;
+  border-radius: 10px;
   cursor: pointer;
 }
 
-.auth-tabs {
+.auth-close:hover {
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--text);
+}
+
+.auth-close:focus {
+  outline: none;
+  box-shadow: 0 0 0 4px var(--focus-ring);
+}
+
+/* -------------------------
+   Tabs & Toggles
+   ------------------------- */
+.tabs-row {
   display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: 12px;
+  margin-bottom: 18px;
+  align-items: center;
 }
 
 .tab {
   flex: 1;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid #eee;
-  background: #fafafa;
+  padding: 12px 14px;
+  background: transparent;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  color: var(--muted-text);
   cursor: pointer;
+  font-weight: 800;
+  text-align: center;
+  transition: all 140ms ease;
 }
 
 .tab.active {
-  background: #111827;
-  color: white;
-  border-color: #111827;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.02), rgba(0, 0, 0, 0.01));
+  color: var(--text);
+  box-shadow: 0 8px 28px rgba(2, 6, 23, 0.08);
 }
 
-.auth-form input {
+.small-tab {
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted-text);
+}
+
+.small-tab.active {
+  background: rgba(0, 0, 0, 0.03);
+  color: var(--text);
+}
+
+/* -------------------------
+   Forms & inputs
+   ------------------------- */
+.auth-form input,
+.auth-modal input {
   width: 100%;
-  padding: 10px 12px;
-  margin-top: 8px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  font-size: 14px;
+  padding: 13px 16px;
+  margin-top: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: var(--muted-surface);
+  color: var(--text);
+  font-size: 15px;
+  transition: box-shadow 120ms ease, border-color 120ms ease;
   box-sizing: border-box;
 }
 
+.auth-form input::placeholder {
+  color: var(--muted-text);
+  opacity: 0.95;
+}
+
+.auth-form input:focus,
+.auth-modal input:focus {
+  outline: none;
+  border-color: rgba(0, 0, 0, 0.12);
+  box-shadow: 0 10px 30px rgba(2, 6, 23, 0.06), 0 0 0 6px var(--focus-ring);
+}
+
+/* -------------------------
+   Buttons
+   ------------------------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: transparent;
+  color: var(--text);
+  font-weight: 800;
+  font-size: 15px;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 160ms ease, background 120ms ease;
+  min-height: 46px;
+}
+
+.btn[disabled],
+.btn[aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn.primary {
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 80%, black 10%));
+  color: var(--accent-contrast);
+  border: none;
+  box-shadow: 0 12px 36px rgba(22, 163, 74, 0.12);
+}
+
+.btn.ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+/* Google button (light default) */
+.btn.google {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--google-bg);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  color: var(--google-text);
+  font-weight: 800;
+  font-size: 15px;
+  min-height: 46px;
+}
+
+.btn.google:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 30px rgba(2, 6, 23, 0.06);
+}
+
+/* inner elements for google button */
+.google-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.google-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.google-text {
+  letter-spacing: 0.2px;
+}
+
+/* -------------------------
+   Helper text, errors, suggestions
+   ------------------------- */
 .auth-error {
-  color: #b91c1c;
+  color: var(--error);
   margin-top: 10px;
   font-size: 13px;
+  font-weight: 700;
 }
 
-.auth-footer {
-  margin-top: 14px;
+.auth-hint {
+  margin-top: 8px;
   font-size: 13px;
-  color: #555;
+  color: var(--muted-text);
 }
 
-.link-btn {
-  background: none;
-  border: none;
-  color: #0b5fff;
-  cursor: pointer;
-  padding: 0;
+.handle-status {
   font-size: 13px;
+  margin-top: 8px;
+  color: var(--muted-text);
 }
 
-/* reuse some generic btn classes (if you already have them, skip) */
-.btn {
-  padding: 8px 12px;
-  border-radius: 8px;
-  border: 1px solid #ddd;
-  background: #fff;
-  cursor: pointer;
-}
-.btn.primary {
-  background: #0b5fff;
-  color: white;
-  border-color: #0b5fff;
-}
-.small-tab {
-  padding: 6px 8px;
-  border-radius: 8px;
-  border: 1px solid #eee;
-  background: #fafafa;
-  cursor: pointer;
-  font-size: 13px;
-}
-.small-tab.active {
-  background: #111827;
-  color: white;
-  border-color: #111827;
+.handle-status .handle-success {
+  color: #16a34a;
+  font-weight: 700;
 }
 
-.btn.google {
-  padding: 8px 12px;
-  border-radius: 8px;
-  border: 1px solid #ddd;
-  background: white;
+.handle-status .handle-error {
+  color: var(--error);
+  font-weight: 700;
+}
+
+.suggestions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.suggestion-btn {
+  background: transparent;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  padding: 8px 10px;
+  border-radius: 10px;
   cursor: pointer;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.suggestion-btn:hover {
+  background: rgba(0, 0, 0, 0.03);
+  transform: translateY(-1px);
+}
+
+/* -------------------------
+   Responsive adjustments
+   ------------------------- */
+@media (max-width:520px) {
+  .auth-modal {
+    padding: 18px;
+    width: 92%;
+  }
+
+  .tab {
+    padding: 10px;
+  }
+
+  .btn {
+    width: 100%;
+  }
+}
+
+/* -------------------------
+   Dark theme overrides (explicit)
+   ------------------------- */
+.dark-theme {
+  --surface: #0b0f12;
+  /* modal background in dark mode */
+  --surface-2: #0f1316;
+  --muted-surface: #0b0f12;
+  --text: #e8eef3;
+  /* primary text on dark */
+  --muted-text: rgba(255, 255, 255, 0.62);
+  --hint-text: rgba(255, 255, 255, 0.5);
+  --border: rgba(255, 255, 255, 0.04);
+  --google-bg: rgba(255, 255, 255, 0.02);
+  --google-text: rgba(255, 255, 255, 0.92);
+  --card-shadow: 0 24px 64px rgba(0, 0, 0, 0.7);
+  --focus-ring: rgba(37, 99, 235, 0.14);
+  --error: #ff8a8a;
+}
+
+/* enforce dark modal surface and contrasts */
+.dark-theme .auth-modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+/* inputs in dark theme */
+.dark-theme .auth-form input,
+.dark-theme .auth-modal input {
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.dark-theme .auth-form input::placeholder {
+  color: var(--muted-text);
+  opacity: 1;
+}
+
+/* tabs / buttons in dark theme ensure readable text */
+.dark-theme .tab,
+.dark-theme .small-tab,
+.dark-theme .btn,
+.dark-theme .suggestion-btn {
+  color: var(--muted-text);
+}
+
+/* active states use primary contrast */
+.dark-theme .tab.active,
+.dark-theme .small-tab.active {
+  color: var(--text);
+}
+
+/* google button contrast for dark */
+.dark-theme .btn.google {
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--google-text);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+/* forced colors accessibility */
+@media (forced-colors: active) {
+
+  .auth-close,
+  .tab,
+  .btn {
+    forced-color-adjust: none;
+  }
+}
+
+/* focus visible */
+button:focus,
+input:focus {
+  outline: none;
+  box-shadow: 0 0 0 6px var(--focus-ring);
+  border-radius: 8px;
 }

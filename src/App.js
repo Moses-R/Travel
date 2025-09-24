@@ -1,6 +1,6 @@
 // src/App.js
-import React, { useState } from "react";
-import { BrowserRouter, Routes, Route, useNavigate, useParams, useLocation } from "react-router-dom";
+import React, { useState, useEffect } from "react";
+import { BrowserRouter, Routes, Route, useNavigate, useParams } from "react-router-dom";
 
 import HomePage from "./pages/Home";   // landing page
 import TravelPage from "./pages/Travel"; // public profile / trip page
@@ -10,48 +10,59 @@ import "./App.css";
 import AuthModal from "./components/AuthModal";
 import Navbar from "./components/Navbar";
 import TripModal from "./components/TripModal";
+import Footer from "./components/Footer";
+import Privacy from "./pages/Privacy";
+import Terms from "./pages/Terms";
+import Contact from "./pages/Contact";
+import { setFavicon, setTitle } from "./utils/setMeta";
 import { addTrip } from "./services/trips";
 import { useAuth } from "./context/AuthContext";
 import { normalizeHandle } from "./utils/handle";
 import { auth } from "./firebase";
-/* Wrapper component to pass handle param to TravelPage */
+import { useTheme } from "./context/ThemeContext";
+
+/* Wrapper component to pass handle + slug params to TravelPage */
 function TravelPageWithHandle() {
-  const { handle: rawHandle } = useParams();
-  // console.log("TravelPageWithHandle - raw param:", rawHandle);
+  const { handle: rawHandleParam, slug: rawSlugParam } = useParams();
 
-  // normalizeHandle strips leading @ already
-  const normalized = normalizeHandle(rawHandle);
+  const rawHandle = typeof rawHandleParam === "string" ? decodeURIComponent(rawHandleParam) : "";
+  const rawSlug = typeof rawSlugParam === "string" ? decodeURIComponent(rawSlugParam) : "";
 
-  // console.log("TravelPageWithHandle - normalized handle:", normalized);
+  let handle = "";
+  let slug = "";
 
-  // If invalid, optionally redirect to home (or render 404)
-  if (!normalized) {
-    // console.warn("TravelPageWithHandle - invalid handle, navigating home");
-    // either render Home or navigate programmatically
-    // return <Navigate to="/" replace />;
-    return <HomePage />; // or show a 404
+  if (rawSlug) {
+    handle = rawHandle.replace(/^@+/, "").replace(/^\/+|\/+$/g, "");
+    slug = rawSlug.replace(/^\/+|\/+$/g, "");
+  } else {
+    const seg = rawHandle.replace(/^\/+|\/+$/g, "");
+    if (!seg) {
+      handle = "";
+      slug = "";
+    } else if (seg.startsWith("@")) {
+      handle = seg.replace(/^@+/, "");
+      slug = "";
+    } else if (seg.includes("-")) {
+      handle = "";
+      slug = seg;
+    } else {
+      handle = seg;
+      slug = "";
+    }
   }
 
-  return <TravelPage externalHandle={normalized} />;
-}
+  const normalized = handle ? normalizeHandle(handle) : null;
 
+  if (!normalized && !slug) {
+    return <HomePage />;
+  }
 
-
-/* Small debug helper that shows current location in the UI */
-function LocationDebug() {
-  const loc = useLocation();
-  // console.log("LocationDebug - current location:", loc);
-  return (
-    <div style={{ position: "fixed", left: 12, bottom: 12, background: "#111", color: "#fff", padding: 8, borderRadius: 6, zIndex: 9999 }}>
-      <div style={{ fontSize: 12 }}>pathname: {loc.pathname}</div>
-    </div>
-  );
+  return <TravelPage externalHandle={normalized} externalSlug={slug || null} />;
 }
 
 /* Wrapper so Navbar can call navigate handlers */
 function NavbarWithNavigate({ onOpenAuth, onAddTrip }) {
   const navigate = useNavigate();
-  // console.log("NavbarWithNavigate - component rendered");
 
   const handleViewTrips = (handle) => {
     if (!handle) {
@@ -67,9 +78,7 @@ function NavbarWithNavigate({ onOpenAuth, onAddTrip }) {
     navigate(`/Travel/@${normalized}`);
   };
 
-
   const handleNavigateHome = () => {
-    // console.log("NavbarWithNavigate - handleNavigateHome called, navigating to /");
     navigate("/");
   };
 
@@ -84,42 +93,42 @@ function NavbarWithNavigate({ onOpenAuth, onAddTrip }) {
 }
 
 function App() {
-  // console.log("App - component rendered");
-  const [authMode, setAuthMode] = useState(null); // null | "login" | "signup"
+  const [authMode, setAuthMode] = useState(null);
   const [showAddTripModal, setShowAddTripModal] = useState(false);
   const [savingTrip, setSavingTrip] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const { currentUser } = useAuth();
+  const { theme } = useTheme();
 
-    // choose emulator vs prod
-  const EMULATOR = false; // set true for local testing with emulator
+  const EMULATOR = false;
   const API_BASE = EMULATOR
     ? "http://127.0.0.1:5001/travel-6c761/us-central1/api"
     : "https://us-central1-travel-6c761.cloudfunctions.net/api";
 
-  // createTripCallable instance (memo not strictly required)
+  useEffect(() => {
+    // Example: dynamic tab title
+    if (currentUser) {
+      setTitle(`Jift | Welcome ${currentUser.displayName || "User"}`);
+    } else {
+      setTitle("Jift | Travel Planner");
+    }
+
+    // Example: dynamic favicon
+    if (theme === "dark") {
+      setFavicon("/favicon-dark32.png");
+    } else {
+      setFavicon("/favicon-light32.png");
+    }
+  }, [currentUser, theme]);
   const createTripCallable = React.useMemo(() => {
     return createTripCallableFactory({ auth, apiBase: API_BASE });
   }, [API_BASE]);
 
+  const openAuth = (mode) => setAuthMode(mode);
+  const closeAuth = () => setAuthMode(null);
 
-  // console.log("App - currentUser:", currentUser);
-
-  const openAuth = (mode) => {
-    // console.log("App - openAuth called with mode:", mode);
-    setAuthMode(mode);
-  };
-  const closeAuth = () => {
-    // console.log("App - closeAuth called");
-    setAuthMode(null);
-  };
-
-  const openAddTrip = () => {
-    // console.log("App - openAddTrip called");
-    setShowAddTripModal(true);
-  };
+  const openAddTrip = () => setShowAddTripModal(true);
   const closeAddTrip = () => {
-    // console.log("App - closeAddTrip called");
     setShowAddTripModal(false);
     setSaveError(null);
   };
@@ -136,17 +145,14 @@ function App() {
 
     try {
       if (createTripCallable && typeof createTripCallable.createTrip === "function") {
-        // Prefer server-side atomic create (reserves slug)
         const result = await createTripCallable.createTrip({
           slug: tripData.slug,
           tripData,
         });
-        // result is expected to be { id, slug } (or similar)
         closeAddTrip();
         return result;
       }
 
-      // Fallback to legacy on-client addTrip (your existing implementation)
       const id = await addTrip(tripData, currentUser.uid);
       closeAddTrip();
       return id;
@@ -159,43 +165,38 @@ function App() {
     }
   };
 
-
-  // console.log("App - authMode:", authMode);
-  // console.log("App - showAddTripModal:", showAddTripModal);
-  // console.log("App - savingTrip:", savingTrip);
-  // console.log("App - saveError:", saveError);
-
   return (
     <div>
       <BrowserRouter>
-        <LocationDebug />
         <NavbarWithNavigate onOpenAuth={openAuth} onAddTrip={openAddTrip} />
 
-        <main style={{ minHeight: "calc(100vh - 120px)" }}>
+        <main style={{ minHeight: "calc(100vh - 160px)" }}>
           <Routes>
             <Route path="/debug" element={<div>Debug route</div>} />
             <Route path="/test" element={<Test />} />
             <Route path="/" element={<HomePage />} />
 
             {/* Travel profile pages */}
-            <Route path="/Travel/:handle" element={<TravelPageWithHandle />} />
+            <Route path="/Travel/:handle/:slug?" element={<TravelPageWithHandle />} />
+            <Route path="/Travel/:slug" element={<TravelPageWithHandle />} />
+
+            {/* Legal / contact pages */}
+            <Route path="/privacy" element={<Privacy />} />
+            <Route path="/terms" element={<Terms />} />
+            <Route path="/contact" element={<Contact />} />
 
             {/* Fallback */}
             <Route path="*" element={<HomePage />} />
           </Routes>
-
         </main>
 
         {/* Auth modal */}
         {authMode && (
-          <AuthModal mode={authMode} onClose={closeAuth} onSwitch={(m) => {
-            // console.log("App - AuthModal switch called with mode:", m);
-            setAuthMode(m);
-          }} />
+          <AuthModal mode={authMode} onClose={closeAuth} onSwitch={(m) => setAuthMode(m)} />
         )}
 
         {/* Central TripModal */}
-                <TripModal
+        <TripModal
           open={showAddTripModal}
           onClose={closeAddTrip}
           onSave={handleSaveTrip}
@@ -204,13 +205,15 @@ function App() {
           createTripCallable={createTripCallable}
         />
 
-
         {/* Inline error toast */}
         {saveError && (
           <div style={{ position: "fixed", bottom: 20, right: 20, background: "#ffe6e6", padding: 12, borderRadius: 8 }}>
             <strong>Error:</strong> {saveError}
           </div>
         )}
+
+        {/* Site-wide footer */}
+        <Footer />
       </BrowserRouter>
     </div>
   );

@@ -1,7 +1,6 @@
 // src/components/TripsList.jsx
-import React from "react";
+import React, { useMemo } from "react";
 
-/* ---------- utility helpers moved from Travel.jsx ---------- */
 function toMillis(t) {
     if (t == null) return NaN;
     if (typeof t === "number") return t;
@@ -140,6 +139,30 @@ export default function TripsList({
     // choose active checker
     const activeCheck = typeof isTripActiveProp === "function" ? isTripActiveProp : isTripActiveInternal;
 
+    // SORT: memoized sorted list by start date (ascending)
+    const sortedTrips = useMemo(() => {
+        const arr = Array.isArray(savedTrips) ? [...savedTrips] : [];
+        arr.sort((a, b) => {
+            const aStart = parseDateToMs(a.start_date ?? a.startDate ?? a.start_at ?? a.startAt);
+            const bStart = parseDateToMs(b.start_date ?? b.startDate ?? b.start_at ?? b.startAt);
+
+            const aFinite = Number.isFinite(aStart);
+            const bFinite = Number.isFinite(bStart);
+
+            // both have valid dates -> ascending order
+            if (aFinite && bFinite) return bStart - aStart;
+            // only a has date -> a first
+            if (aFinite) return -1;
+            // only b has date -> b first
+            if (bFinite) return 1;
+            // neither have valid start date -> fallback to title (stable)
+            const ta = String(a.title || a.trip_id || "");
+            const tb = String(b.title || b.trip_id || "");
+            return ta.localeCompare(tb);
+        });
+        return arr;
+    }, [savedTrips]);
+
     return (
         <div className="section">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -149,7 +172,7 @@ export default function TripsList({
             <div style={{ marginTop: 8 }}>
                 {savedTrips.length === 0 && <div className="muted">No saved trips.</div>}
                 <ul className="saved-trip-list">
-                    {savedTrips.map((t) => {
+                    {sortedTrips.map((t) => {
                         const isOwner = user && (t.ownerId === user.uid || t.owner_id === user.uid);
                         const visibility = t.visibility || (t.private ? "private" : "public");
 

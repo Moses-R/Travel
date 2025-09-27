@@ -89,9 +89,12 @@ export default function MapPanel({
         return <GoogleEmbedMap embedHtmlOrUrl={selectedTrip.googleEmbed} height={340} />;
     }
 
+    // Determine whether the current viewer may edit / add an embed
+    const canEdit = Boolean(selectedTrip && isOwner);
+
     // Otherwise show live map or placeholder
     return (
-        <div className="map-box section" style={{ height: 340, position: "relative", cursor: "default" }}>
+        <div className="map-box section" style={{ height: 340, position: "relative", cursor: canEdit ? "pointer" : "default" }}>
             {position ? (
                 <MapContainer center={[position.lat, position.lng]} zoom={11} style={{ height: "100%", borderRadius: 8 }}>
                     <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
@@ -104,25 +107,23 @@ export default function MapPanel({
                     </Marker>
                 </MapContainer>
             ) : (
-                // clickable overlay when there's no GPS fix
+                // overlay: interactive only for owners (canEdit === true)
                 <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => {
-                        // open modal to paste Google map embed (only if a trip is selected)
-                        if (!selectedTrip) {
-                            setToast({ msg: "Select or create a trip first", type: "warning" });
-                            setTimeout(() => setToast(null), 2000);
+                    role={canEdit ? "button" : undefined}
+                    tabIndex={canEdit ? 0 : -1}
+                    onClick={(e) => {
+                        if (!canEdit) {
+                            // non-owners do nothing; optionally show a small toast if desired
                             return;
                         }
-                        // prefill input with any existing embed
+                        // open modal to paste Google map embed (owner only)
                         setGoogleEmbedInput(selectedTrip?.googleEmbed || "");
                         setShowEmbedModal(true);
                     }}
                     onKeyDown={(e) => {
+                        if (!canEdit) return;
                         if (e.key === "Enter" || e.key === " ") {
                             e.preventDefault();
-                            // simulate click
                             e.currentTarget.click();
                         }
                     }}
@@ -136,38 +137,54 @@ export default function MapPanel({
                         padding: 16,
                         textAlign: "center",
                         borderRadius: 8,
-                        cursor: "pointer",
+                        cursor: canEdit ? "pointer" : "default",
                         userSelect: "none",
                     }}
-                    title="Click to add a Google map for this trip"
-                    aria-label="Add Google map embed for this trip"
+                    title={canEdit ? "Click to add a Google map for this trip" : "No map available"}
+                    aria-label={canEdit ? "Add Google map embed for this trip" : "Map not available"}
                 >
-                    <div className="muted" style={{ fontSize: 15 }}>
-                        No GPS fix yet — click "Start tracking"
-                    </div>
+                    {canEdit ? (
+                        <>
+                            <div className="muted" style={{ fontSize: 15 }}>
+                                No GPS fix yet — click "Start tracking"
+                            </div>
 
-                    <div style={{ fontSize: 13, color: "#666", maxWidth: 420 }}>
-                        Want to show a custom map instead? Click here to paste a Google Maps / My Maps embed URL or iframe.
-                    </div>
+                            <div style={{ fontSize: 13, color: "#666", maxWidth: 420 }}>
+                                Want to show a custom map instead? Click here to paste a Google Maps / My Maps embed URL or iframe.
+                            </div>
 
-                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                setShowEmbedModal(true);
-                                setGoogleEmbedInput(selectedTrip?.googleEmbed || "");
-                            }}
-                            className="btn-start"
-                            aria-label="Open map embed dialog"
-                        >
-                            Add / Paste Google map
-                        </button>
+                            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setShowEmbedModal(true);
+                                        setGoogleEmbedInput(selectedTrip?.googleEmbed || "");
+                                    }}
+                                    className="btn-start"
+                                    aria-label="Open map embed dialog"
+                                >
+                                    Add / Paste Google map
+                                </button>
 
-                        {/* small inline hint for owners */}
-                        {selectedTrip && (!isPublicView || isOwner) && (
-                            <div style={{ alignSelf: "center", fontSize: 13, color: "#666" }}>Owners can save a map for this trip</div>
-                        )}
-                    </div>
+                                {/* small inline hint for owners */}
+                                {selectedTrip && (
+                                    <div style={{ alignSelf: "center", fontSize: 13, color: "#666" }}>
+                                        Owners can save a map for this trip
+                                    </div>
+                                )}
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <div className="muted" style={{ fontSize: 15 }}>
+                                Map unavailable
+                            </div>
+
+                            <div style={{ fontSize: 13, color: "#666", maxWidth: 420 }}>
+                                The trip owner has not added a custom map.
+                            </div>
+                        </>
+                    )}
                 </div>
             )}
         </div>

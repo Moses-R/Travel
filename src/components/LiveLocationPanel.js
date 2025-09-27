@@ -157,8 +157,9 @@ export default function LiveLocationPanel({
         if (error) {
             return <div style={{ padding: 8, color: "crimson", fontSize: 13 }}>Failed to load live location.</div>;
         }
+        // CHANGED: do not show a "No live location shared." message — render nothing instead
         if (!liveLocation) {
-            return <div style={{ padding: 8, fontSize: 13, color: "#666" }}>No live location shared.</div>;
+            return null;
         }
 
         // permission check: owner or allowedUsers (mirror logic from viewer)

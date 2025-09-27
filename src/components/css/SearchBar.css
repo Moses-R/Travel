@@ -1,0 +1,361 @@
+/* ===== Shared design tokens (from TripModal.css) ===== */
+:root {
+  --radius-md: 10px;
+  --radius-sm: 6px;
+  --transition-fast: 150ms ease;
+  --shadow-soft: 0 6px 20px rgba(0, 0, 0, 0.12);
+  --shadow-strong: 0 10px 30px rgba(0, 0, 0, 0.2);
+  --glass: rgba(255, 255, 255, 0.04);
+
+  /* fallback/default theme values (light) */
+  --bg: #ffffff;
+  --panel-bg: #ffffff;
+  --text: #111827;
+  --muted: #6b7280;
+  --accent: #2563eb;
+  --accent-contrast: #ffffff;
+  --btn-primary-bg: var(--accent);
+  --btn-primary-text: var(--accent-contrast);
+  --btn-secondary-bg: #f3f4f6;
+  --btn-secondary-text: #111827;
+  --input-bg: #fff;
+  --input-border: #e5e7eb;
+  --input-placeholder: rgba(0, 0, 0, 0.35);
+  --backdrop-bg: rgba(15, 23, 42, 0.45);
+  --danger: #dc2626;
+
+  /* SearchBar-specific fallbacks that map to the tokens above */
+  --sb-bg: var(--panel-bg);
+  --sb-border: var(--input-border);
+  --sb-ghost: #f7f7fb;
+  --sb-text: var(--text);
+  --sb-subtext: var(--muted);
+  --sb-accent: #0ea5a4;
+  /* kept accent fallback */
+  --sb-active-bg: rgba(14, 165, 164, 0.06);
+  --sb-shadow: var(--shadow-soft);
+  --sb-radius: 12px;
+  --sb-badge-bg: rgba(14, 165, 164, 0.08);
+  --sb-focus-ring: rgba(37, 99, 235, 0.10);
+}
+
+/* dark theme overrides (TripModal-inspired) */
+/* Applies when .dark-theme or body.dark-theme is present */
+.dark-theme,
+body.dark-theme {
+  --bg: #0b1220;
+  --panel-bg: #0f1724;
+  --text: #e6eef8;
+  --muted: #9aa7bf;
+  --accent: #60a5fa;
+  --accent-contrast: #06233a;
+  --btn-primary-bg: var(--accent);
+  --btn-primary-text: #06233a;
+  --btn-secondary-bg: rgba(255, 255, 255, 0.06);
+  --btn-secondary-text: #e6eef8;
+  --input-bg: #071021;
+  --input-border: rgba(255, 255, 255, 0.08);
+  --input-placeholder: rgba(255, 255, 255, 0.22);
+  --backdrop-bg: rgba(2, 6, 23, 0.7);
+  --danger: #f87171;
+
+  /* Map SearchBar-specific vars to dark tokens too */
+  --sb-bg: var(--panel-bg);
+  --sb-border: var(--input-border);
+  --sb-ghost: rgba(255, 255, 255, 0.02);
+  --sb-text: var(--text);
+  --sb-subtext: var(--muted);
+  --sb-accent: var(--accent);
+  --sb-active-bg: rgba(255, 255, 255, 0.02);
+  --sb-shadow: 0 12px 26px rgba(2, 6, 23, 0.6);
+  --sb-badge-bg: rgba(77, 208, 196, 0.06);
+  --sb-focus-ring: rgba(77, 208, 196, 0.12);
+}
+
+/* system preference fallback (applies only when no explicit theme set) */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .hp-search {
+    --sb-bg: #0f1724;
+    --sb-border: rgba(255, 255, 255, 0.08);
+    --sb-ghost: rgba(255, 255, 255, 0.02);
+    --sb-text: #e6eef8;
+    --sb-subtext: #9aa7bf;
+    --sb-accent: #60a5fa;
+    --sb-active-bg: rgba(255, 255, 255, 0.02);
+    --sb-shadow: 0 12px 26px rgba(2, 6, 23, 0.6);
+    --sb-badge-bg: rgba(77, 208, 196, 0.06);
+    --sb-focus-ring: rgba(77, 208, 196, 0.12);
+  }
+}
+
+/* High-contrast / forced-colors support */
+@media (forced-colors: active) {
+  .hp-search {
+    border: 1px solid WindowText;
+    background: Window;
+    color: WindowText;
+    box-shadow: none;
+  }
+
+  .search-item:focus,
+  .search-item:hover,
+  .search-item.active {
+    background: Highlight;
+    color: HighlightText;
+  }
+}
+
+/* ===== Accessibility helpers ===== */
+.search-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 4px var(--sb-focus-ring);
+  border-radius: 10px;
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+
+  .search-item,
+  .search-item.active,
+  .search-input-wrap {
+    transition: none !important;
+  }
+}
+
+/* ===== Remaining SearchBar styles (structure preserved, but variables used) ===== */
+
+/* Root container */
+.hp-search {
+  position: relative;
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+}
+
+/* Input wrapper */
+.search-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--sb-bg);
+  border: 1px solid var(--sb-border);
+  border-radius: var(--sb-radius);
+  padding: 8px 12px;
+  box-shadow: var(--sb-shadow);
+}
+
+/* Search input */
+.search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 15px;
+  color: var(--sb-text);
+  padding: 8px 4px;
+}
+
+/* Clear button */
+.search-clear {
+  background: transparent;
+  border: none;
+  color: var(--sb-subtext);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 6px;
+  border-radius: 8px;
+}
+
+.search-clear:hover {
+  background: var(--sb-ghost);
+}
+
+/* Dropdown */
+.search-dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  right: 0;
+  background: var(--sb-bg);
+  border: 1px solid var(--sb-border);
+  border-radius: var(--sb-radius);
+  box-shadow: var(--sb-shadow);
+  padding: 8px;
+  z-index: 60;
+  transform-origin: top center;
+  display: none;
+}
+
+/* show */
+.search-dropdown.show {
+  display: block;
+}
+
+/* Empty state */
+.search-empty {
+  padding: 20px;
+  color: var(--sb-subtext);
+  text-align: center;
+  font-size: 14px;
+}
+
+/* List items */
+.search-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 120ms ease, transform 100ms ease;
+}
+
+.search-item+.search-item {
+  margin-top: 6px;
+}
+
+.search-item:hover {
+  background: var(--sb-active-bg);
+}
+
+.search-item.active {
+  background: var(--sb-active-bg);
+  box-shadow: inset 0 0 0 1px rgba(14, 165, 164, 0.06);
+  transform: translateY(-1px);
+}
+
+/* Left avatar */
+.item-left {
+  width: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.item-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: linear-gradient(180deg, #f3f4f6, #ffffff);
+  border: 1px solid var(--sb-border);
+}
+
+.item-avatar.placeholder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: var(--sb-subtext);
+  background: var(--sb-ghost);
+}
+
+/* Middle body */
+.item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.item-title {
+  font-weight: 600;
+  color: var(--sb-text);
+  font-size: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.item-sub {
+  font-size: 13px;
+  color: var(--sb-subtext);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Right badge */
+.item-right {
+  margin-left: 8px;
+  display: flex;
+  align-items: center;
+}
+
+.type-badge {
+  padding: 6px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--sb-accent);
+  background: var(--sb-badge-bg);
+}
+
+/* Footer */
+.search-footer {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--sb-border);
+  display: flex;
+  justify-content: center;
+}
+
+.see-all-btn {
+  background: transparent;
+  border: none;
+  color: var(--sb-accent);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Responsive (mobile) */
+@media (max-width: 640px) {
+  .hp-search {
+    max-width: 100%;
+    padding: 0 12px;
+  }
+
+  .search-dropdown {
+    left: 12px;
+    right: 12px;
+    top: calc(100% + 8px);
+    border-radius: 12px;
+  }
+
+  .item-left {
+    width: 44px;
+  }
+
+  .item-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+  }
+}
+
+/* subtle visual tweaks */
+.search-dropdown {
+  box-shadow: 0 8px 24px rgba(2, 6, 23, 0.08);
+  border-radius: 8px;
+  padding: 4px;
+}
+
+.search-item {
+  transition: background .12s ease;
+  border-radius: 6px;
+}
+
+.search-item:hover,
+.search-item.active {
+  background: rgba(99, 102, 241, 0.06);
+}
+
+/* keyboard focus outlines */
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 3px solid rgba(99, 102, 241, 0.14);
+  outline-offset: 2px;
+}

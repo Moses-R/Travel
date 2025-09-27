@@ -1,0 +1,10 @@
+.quick-stats-card .stat-num {
+    font-size: 17px;
+    font-weight: 700;
+}
+
+.quick-stats-card .stat-label {
+    font-size: 12px;
+    color: #6b7280;
+    margin-top: 6px;
+}

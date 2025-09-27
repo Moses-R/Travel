@@ -1,0 +1,189 @@
+/* MapEmbedModal.css - lightweight theme-aware modal styles */
+
+/* reuse color variables if defined else fallback */
+:root {
+    --memodal-bg: var(--surface, #fafafa);
+    --memodal-text: var(--text, #111827);
+    --memodal-muted: var(--muted, #6b7280);
+    --memodal-border: var(--border, #e6e9ee);
+    --memodal-shadow: var(--box-shadow, 0 6px 20px rgba(16, 24, 40, 0.08));
+    --accent: var(--accent, #0b84ff);
+    --success: var(--success, #16a34a);
+    --danger: var(--danger, #ef4444);
+    --backdrop: rgba(2, 6, 23, 0.45);
+}
+
+/* backdrop */
+.memodal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: var(--backdrop);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1200;
+    padding: 20px;
+}
+
+/* modal container */
+.memodal {
+    width: 920px;
+    max-width: calc(100% - 48px);
+    background: var(--memodal-bg);
+    color: var(--memodal-text);
+    border-radius: 12px;
+    border: 1px solid var(--memodal-border);
+    box-shadow: var(--memodal-shadow);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 80px);
+}
+
+/* header */
+.memodal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--memodal-border);
+}
+
+.memodal-header h2 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.memodal-close {
+    background: transparent;
+    border: none;
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    color: var(--memodal-muted);
+}
+
+/* body */
+.memodal-body {
+    padding: 16px 18px;
+    overflow: auto;
+    flex: 1;
+}
+
+.memodal-label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 14px;
+    color: var(--memodal-muted);
+}
+
+/* textarea */
+.memodal-textarea {
+    width: 100%;
+    min-height: 92px;
+    resize: vertical;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid var(--memodal-border);
+    background: var(--bg, #fff);
+    color: var(--memodal-text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", monospace;
+    font-size: 13px;
+    box-sizing: border-box;
+}
+
+/* hint & validation row */
+.memodal-hint-row {
+    margin-top: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.memodal-validation {
+    font-size: 13px;
+    color: var(--memodal-muted);
+}
+
+.memodal-validation.valid {
+    color: var(--success);
+    font-weight: 600;
+}
+
+.memodal-validation.invalid {
+    color: var(--memodal-muted);
+}
+
+/* actions inline */
+.memodal-actions-inline {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+/* preview */
+.memodal-preview {
+    margin-top: 14px;
+}
+
+.memodal-preview-title {
+    font-size: 13px;
+    color: var(--memodal-muted);
+    margin-bottom: 8px;
+}
+
+.memodal-preview-box {
+    border-radius: 8px;
+    border: 1px solid var(--memodal-border);
+    background: var(--bg, #fff);
+    min-height: 140px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.memodal-preview-empty {
+    padding: 18px;
+    color: var(--memodal-muted);
+    font-size: 13px;
+    text-align: center;
+}
+
+/* footer */
+.memodal-footer {
+    padding: 12px 16px;
+    border-top: 1px solid var(--memodal-border);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.memodal-footer .btn-link {
+    background: transparent;
+    color: var(--memodal-muted);
+    border: none;
+    cursor: pointer;
+}
+
+.memodal-footer .btn-start {
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-weight: 600;
+}
+
+/* responsive */
+@media (max-width: 760px) {
+    .memodal {
+        width: 100%;
+        max-width: calc(100% - 24px);
+        border-radius: 10px;
+    }
+
+    .memodal-preview-box iframe {
+        height: 220px;
+    }
+}

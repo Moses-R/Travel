@@ -39,7 +39,6 @@ filter.addWords(
 );
 
 filter.addWords(
-    "ride",
     "rides",
     "rider",
     "riders",

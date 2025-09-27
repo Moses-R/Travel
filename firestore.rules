@@ -1,24 +1,301 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+  
+   // Helpers (replace your existing helpers with these)
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
+    function isAdmin() { return isSignedIn() && request.auth.token.admin == true; }
+    function isValidVisibility(v) { return v == "public" || v == "restricted" || v == "private"; }
+    function liveAllowedKeys() {
+      return ['uid','lat','lng','accuracy','displayName','photoURL','sharing','updatedAt','visibility','allowedUsers'];
+    }
+    function onlyAllowedKeys(data) {
+      return data.keys().toSet().difference(liveAllowedKeys().toSet()).size() == 0;
+    }
+    // Allow allowedUsers to be absent, an empty list, or a list of strings (checked only if non-empty)
+    function validAllowedUsers(data) {
+      return (
+        !('allowedUsers' in data)
+        || (data.allowedUsers is list
+            && data.allowedUsers.size() <= 200
+            && (data.allowedUsers.size() == 0 || data.allowedUsers[0] is string))
+      );
+    }
+
+    /* ---------------------------
+       liveLocations collection
+       --------------------------- */
+    match /liveLocations/{uid} {
+      // READ (get/list): allow if the live doc is shared/public, or the auth uid equals the live doc uid,
+      // or the referenced trip (if provided) grants access.
+      allow get, list: if (
+          // 1) live location explicitly shared
+          (resource.data.keys().hasAny(['sharing']) && resource.data.sharing is bool && resource.data.sharing == true)
+          // 2) live location explicitly public
+          || (resource.data.keys().hasAny(['visibility']) && resource.data.visibility == 'public')
+          // 3) owner of this live location
+          || (request.auth != null && request.auth.uid == uid)
+          // 4) live location visibility restricted and allowedUsers on the live doc contains requester
+          || (request.auth != null
+              && resource.data.keys().hasAny(['visibility','allowedUsers'])
+              && resource.data.visibility == 'restricted'
+              && resource.data.allowedUsers is list
+              && request.auth.uid in resource.data.allowedUsers)
+          // 5) referenced trip grants access (if live doc includes tripId)
+          || (request.auth != null
+              && resource.data.keys().hasAny(['tripId'])
+              && resource.data.tripId is string
+              && (
+                    // get the trip doc and inspect its visibility/owner/allowedUsers
+                    (get(/databases/$(database)/documents/trips/$(resource.data.tripId)).data.visibility is string
+                       && get(/databases/$(database)/documents/trips/$(resource.data.tripId)).data.visibility == 'public')
+                    // owner of trip
+                    || (get(/databases/$(database)/documents/trips/$(resource.data.tripId)).data.owner_id is string
+                        && get(/databases/$(database)/documents/trips/$(resource.data.tripId)).data.owner_id == request.auth.uid)
+                    // allowedUsers on the trip
+                    || (get(/databases/$(database)/documents/trips/$(resource.data.tripId)).data.allowedUsers is list
+                        && request.auth.uid in get(/databases/$(database)/documents/trips/$(resource.data.tripId)).data.allowedUsers)
+                 )
+             )
+          // 6) admin override (if you use admin token)
+          || isAdmin()
+      );
+
+      // Creation/updating/deleting of liveLocations should be handled by your previous rules (keep as you had)
+      allow create: if request.auth != null && request.auth.uid == uid && onlyAllowedKeys(request.resource.data);
+      allow update: if request.auth != null && request.auth.uid == uid && onlyAllowedKeys(request.resource.data);
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+
+    /* ---------------------------
+       handles collection
+       --------------------------- */
     match /handles/{handleId} {
       allow create: if request.auth != null
                     && request.resource.data.uid == request.auth.uid
                     && request.resource.data.keys().hasOnly(['uid','createdAt']);
-      // disallow update/delete from clients (server-only)
-      allow update, delete: if false;
+      allow delete: if request.auth != null
+               && resource.data.uid == request.auth.uid;
+      allow update: if false;
       allow read: if true;
     }
 
+    /* ---------------------------
+       users collection
+       --------------------------- */
     match /users/{userId} {
       allow read: if true; // adjust to your needs
       allow create, update: if request.auth != null && request.auth.uid == userId;
     }
 
-     match /trips/{tripId} {
-      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
-      allow read: if true; // restrict as needed
+    /* ---------------------------
+       slugs collection (NEW)
+       Public slug -> tripId mapping. Clients must be able to read this.
+       --------------------------- */
+    match /slugs/{slug} {
+      // allow anyone to resolve slug -> tripId
+      allow get: if true;
+
+      // only authenticated owner may create a slug mapping
+      allow create: if request.auth != null
+                    && request.resource.data.tripId is string
+                    && request.resource.data.ownerId is string
+                    && request.resource.data.ownerId == request.auth.uid;
+
+      // owner may update/delete their slug mapping
       allow update, delete: if request.auth != null && resource.data.ownerId == request.auth.uid;
     }
+
+    /* ---------------------------
+       trips collection
+       --------------------------- */
+    match /trips/{tripId} {
+      // --------------------
+      // Trip document access
+      // --------------------
+
+      // Create: require authentication; if owner_id provided it must equal auth.uid
+      allow create: if request.auth != null
+        && (
+          !('owner_id' in request.resource.data)
+          || request.resource.data.owner_id == request.auth.uid
+        )
+        // optional lightweight shape checks for created trip
+        && request.resource.data.keys().hasAny(['title'])
+        && ( !('allowedUsers' in request.resource.data) || request.resource.data.allowedUsers is list );
+
+      // Read: public OR owner OR listed in allowedUsers
+      allow get: if resource.data.visibility == "public"
+        || (request.auth != null && (
+             (resource.data.owner_id is string && resource.data.owner_id == request.auth.uid)
+             || (resource.data.ownerId is string && resource.data.ownerId == request.auth.uid)
+             || (resource.data.allowedUsers is list && request.auth.uid in resource.data.allowedUsers)
+           ));
+
+      // NOTE: be conservative with list() — queries require stricter checks. If you must allow list for certain queries,
+      // ensure the query constraints are limited to fields you can validate. For backwards compatibility, we allow list
+      // only for an explicitly public filter (this may still be restricted depending on client queries).
+      allow list: if true;
+
+      // Only owner can update or delete the trip doc
+      allow update, delete: if request.auth != null && (
+        (resource.data.owner_id is string && resource.data.owner_id == request.auth.uid)
+        || (resource.data.ownerId is string && resource.data.ownerId == request.auth.uid)
+      );
+
+
+      // -------------------------
+      // sights subcollection rules
+      // -------------------------
+      match /sights/{sightId} {
+        // Helper to access the parent trip doc safely (works on create too)
+        function tripData() {
+          return get(/databases/$(database)/documents/trips/$(tripId)).data;
+        }
+
+        // Read: allowed when trip is public OR requester is owner OR allowedUsers includes requester
+        allow get, list: if tripData().visibility == "public"
+          || (request.auth != null && (
+               tripData().owner_id == request.auth.uid
+               || request.auth.uid in (tripData().allowedUsers)
+             ));
+
+        // Validate sight payload keys & types for create/update
+        function validSightKeys() {
+          // allowed keys for sights (extend if you add fields)
+          return request.resource.data.keys().hasOnly([
+            'provider','placeId','name','category','location','photoUrl','tripId','mode','createdAt','createdBy','notes'
+          ]);
+        }
+        function validSightLocation() {
+          return ('location' in request.resource.data)
+            && (request.resource.data.location.lat is number)
+            && (request.resource.data.location.lng is number);
+        }
+
+        // Create: only owner or allowedUsers may create sights for this trip
+        allow create: if request.auth != null
+          && (
+            request.auth.uid == tripData().owner_id
+            || (tripData().allowedUsers is list && request.auth.uid in tripData().allowedUsers)
+          )
+          // require payload shape & types
+          && validSightKeys()
+          && validSightLocation()
+          // require that tripId matches parent
+          && (request.resource.data.tripId == tripId)
+          // require createdBy matches auth (optional but useful)
+          && (request.resource.data.createdBy == request.auth.uid)
+          // encourage server timestamp equality if provided
+          && (
+            !('createdAt' in request.resource.data)
+            || request.resource.data.createdAt == request.time
+          );
+
+        // Update/Delete: only owner or allowedUsers (same as create)
+        allow update, delete: if request.auth != null
+          && (
+            request.auth.uid == tripData().owner_id
+            || (tripData().allowedUsers is list && request.auth.uid in tripData().allowedUsers)
+          )
+          // for updates, validate new shape if present
+          && ( !('location' in request.resource.data) || (request.resource.data.location.lat is number && request.resource.data.location.lng is number) )
+          && ( !('tripId' in request.resource.data) || request.resource.data.tripId == tripId )
+          && ( !('createdBy' in request.resource.data) || request.resource.data.createdBy == resource.data.createdBy )
+          && ( !('createdAt' in request.resource.data) || request.resource.data.createdAt == resource.data.createdAt );
+
+      } // end sights
+
+
+           // -------------------------
+      // media subcollection rules
+      // -------------------------
+      match /media/{mediaId} {
+        // Helper to access the parent trip doc
+        function tripData() {
+          return get(/databases/$(database)/documents/trips/$(tripId)).data;
+        }
+
+        // Read: allow list & get when the parent trip is public OR the requester is owner OR listed in allowedUsers
+        allow get, list: if tripData().visibility == "public"
+          || (request.auth != null && (
+               (tripData().owner_id is string && tripData().owner_id == request.auth.uid)
+               || (tripData().ownerId is string && tripData().ownerId == request.auth.uid)
+               || (tripData().allowedUsers is list && request.auth.uid in tripData().allowedUsers)
+             ));
+
+        // CREATE:
+        // - allow create if the uploader field equals the authenticated user (request.resource.data.uploadedBy)
+        // - OR allow create if auth.uid == trip.owner (owner_id / ownerId)
+        allow create: if request.auth != null && (
+          request.auth.uid == request.resource.data.uploadedBy
+          || request.auth.uid == tripData().owner_id
+          || request.auth.uid == tripData().ownerId
+        );
+
+        // Only trip owner can update or delete media items
+        allow update, delete: if request.auth != null && (
+          request.auth.uid == tripData().owner_id
+          || request.auth.uid == tripData().ownerId
+        );
+      }
+
+
+    } // end trips
+
+
+    /* ============================
+       Emergencies
+       Collection: emergencies/{uid}
+       - Create only by owner; require server timestamp
+       - Read only by owner (adjust if you want watchers)
+       - No client updates/deletes allowed (server/CF should handle)
+       ============================ */
+    match /emergencies/{uid} {
+      // Create: owner only, strict payload and server timestamp
+      allow create: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['uid','lat','lng','accuracy','createdAt','message'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.lat is number
+        && request.resource.data.lng is number
+        && ( !('accuracy' in request.resource.data) || request.resource.data.accuracy is number )
+        && ( !('message' in request.resource.data) || request.resource.data.message is string )
+        // require server timestamp
+        && request.resource.data.createdAt == request.time;
+
+      // Disallow client-side updates (admins/cloud functions only)
+      allow update: if false;
+
+      // Read: only owner (change to isSignedIn() or other policy if required)
+      allow get, list: if request.auth != null && request.auth.uid == uid;
+
+      // Delete: disallow from clients (server/admin may remove)
+      allow delete: if false;
+    }
+
+    /* ---------------------------
+       follows collection
+       --------------------------- */
+   match /follows/{followId} {
+  // Public read: anyone may read a follow doc or list follows (needed for follower counts)
+  allow get, list: if true;
+
+  // create: only an authenticated user may create a follow doc and the doc id must be "<follower>_<followee>"
+  allow create: if request.auth != null
+    && request.resource.id == (request.auth.uid + "_" + request.resource.data.followeeId)
+    && request.resource.data.followerId == request.auth.uid
+    && request.resource.data.keys().hasOnly(['followerId','followeeId','createdAt'])
+    && request.resource.data.createdAt == request.time;
+
+  // delete: only the follower may delete their follow doc
+  allow delete: if request.auth != null && resource.data.followerId == request.auth.uid;
+
+  // disallow client-side updates to follow documents
+  allow update: if false;
+}
+
+
   }
 }

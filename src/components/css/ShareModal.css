@@ -1,0 +1,171 @@
+/* src/css/ShareModal.css
+   Styles scoped ONLY for ShareModal (safe, won't affect other modals)
+*/
+
+/* Backdrop */
+.share-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--backdrop-bg, rgba(15, 23, 42, 0.45));
+    z-index: 2000;
+    padding: 20px;
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+}
+
+/* Card */
+.share-modal {
+    width: 560px;
+    max-width: 100%;
+    background: var(--panel-bg, #fff);
+    color: var(--text, #111);
+    border-radius: 10px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+    padding: 18px;
+    border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+/* Header */
+.share-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.share-modal-header h3 {
+    margin: 0;
+    font-size: 18px;
+}
+
+.share-modal-close {
+    background: transparent;
+    border: none;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 6px;
+    color: var(--muted, #666);
+}
+
+.share-modal-close:hover {
+    opacity: 0.85;
+}
+
+/* Intro text */
+.share-modal-intro {
+    margin-top: 10px;
+    font-size: 13px;
+    color: var(--muted, #666);
+}
+
+/* Action buttons row */
+.share-modal-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+}
+
+/* Local button style (safe) */
+.share-modal-btn {
+    padding: 8px 12px;
+    font-size: 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: 0.15s ease;
+}
+
+.share-modal-btn:active {
+    transform: translateY(1px);
+}
+
+.share-modal-btn.primary {
+    background: var(--btn-primary-bg, #2563eb);
+    color: var(--btn-primary-text, #fff);
+}
+
+.share-modal-btn.secondary {
+    background: var(--btn-secondary-bg, #f3f4f6);
+    color: var(--btn-secondary-text, #111);
+    border: 1px solid var(--input-border, #e5e7eb);
+}
+
+/* Error */
+.share-modal-error {
+    margin-top: 10px;
+    font-size: 13px;
+    color: var(--danger, #dc2626);
+}
+
+/* Followers block */
+.share-modal-followers {
+    margin-top: 14px;
+}
+
+.share-modal-followers-header {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.share-modal-followers-list {
+    margin-top: 8px;
+    max-height: 220px;
+    overflow-y: auto;
+    border: 1px solid var(--input-border, #e5e7eb);
+    padding: 8px;
+    border-radius: 6px;
+}
+
+.share-modal-follower {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 4px;
+}
+
+.share-modal-follower:hover {
+    background: rgba(0, 0, 0, 0.02);
+}
+
+.share-modal-follower .name {
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.share-modal-follower .meta {
+    font-size: 12px;
+    color: var(--muted, #666);
+}
+
+/* Footer controls */
+.share-modal-controls {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+/* Responsive */
+@media (max-width: 540px) {
+    .share-modal {
+        width: 100%;
+        padding: 14px;
+        border-radius: 8px;
+    }
+
+    .share-modal-header h3 {
+        font-size: 16px;
+    }
+
+    .share-modal-btn {
+        font-size: 13px;
+        padding: 8px 10px;
+    }
+}

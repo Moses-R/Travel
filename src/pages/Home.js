@@ -4,6 +4,10 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import AuthModal from "../components/AuthModal";
 import "./css/Home.css";
+import FollowedCreatorsPanel from "../components/FollowedCreatorsPanel";
+import SearchBar from "../components/SearchBar";
+import NewMembers from "../components/NewMembers";
+import QuickStats from "../components/QuickStats";
 
 // Lazy placeholder: we'll load AddTripModal dynamically when needed.
 // Note: we still use dynamic import manually so we can support both default or named exports.
@@ -174,7 +178,6 @@ export default function HomePage() {
     return () => window.removeEventListener("jift:openAddTrip", onOpen);
   }, [AddModalComp]);
 
-
   // If user clicks button inside Home page
   const handleAddTripClick = (e) => {
     if (!currentUser) {
@@ -184,7 +187,6 @@ export default function HomePage() {
     // Try to open modal by loading TripModal locally (falls back to event only if import fails)
     openAddTripModal();
   };
-
 
   const handleCreateProfileClick = () => {
     setAuthOpen(true);
@@ -259,13 +261,8 @@ export default function HomePage() {
         </div>
 
         <div style={{ marginLeft: "auto" }}>
-          <div className="hp-search">
-            <input
-              placeholder="Search people, places, tags..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </div>
+          <SearchBar users={users} trips={featured} />
+
         </div>
       </header>
 
@@ -355,23 +352,8 @@ export default function HomePage() {
         </div>
 
         <aside className="right-column">
-          <div className="card small">
-            <h4 style={{ marginTop: 0 }}>Quick stats</h4>
-            <div className="stats-grid" style={{ marginTop: 8 }}>
-              <div>
-                <div className="stat-num">{featured.length > 0 ? featured.length : "—"}</div>
-                <div className="stat-label">Featured trips</div>
-              </div>
-              <div>
-                <div className="stat-num">{users.length > 0 ? users.length : "—"}</div>
-                <div className="stat-label">Creators</div>
-              </div>
-              <div>
-                <div className="stat-num">—</div>
-                <div className="stat-label">Shares</div>
-              </div>
-            </div>
-          </div>
+          <QuickStats />
+
 
           <div className="card small">
             <h4 style={{ marginTop: 0 }}>Suggested creators</h4>
@@ -382,51 +364,9 @@ export default function HomePage() {
               {!loading && users.length === 0 && <div style={{ color: "#6b7280", paddingTop: 8 }}>No creators yet.</div>}
             </div>
           </div>
+          <FollowedCreatorsPanel />
 
-          <div className="card small">
-            <h4 style={{ marginTop: 0 }}>New members</h4>
-            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-              {loading
-                ? Array.from({ length: 3 }).map((_, i) => (
-                  <li key={i}>
-                    <Skeleton height={44} />
-                  </li>
-                ))
-                : users.slice(0, 5).map((u) => (
-                  <li
-                    key={u.id}
-                    style={{
-                      display: "flex",
-                      gap: 10,
-                      alignItems: "center",
-                      padding: "8px 0",
-                    }}
-                  >
-                    <img
-                      src={u.avatar || "/default-avatar.png"}
-                      alt=""
-                      style={{
-                        width: 40,
-                        height: 40,
-                        borderRadius: 8,
-                        objectFit: "cover",
-                      }}
-                    />
-                    <div>
-                      <Link to={`/users/${u.id}`} style={{ fontWeight: 600 }}>
-                        {u.name}
-                      </Link>
-                      <div style={{ color: "#6b7280", fontSize: 13 }}>{u.location}</div>
-                    </div>
-                  </li>
-                ))}
-            </ul>
-            <div style={{ textAlign: "center", marginTop: 8 }}>
-              <Link to="/users" style={{ color: "var(--accent)", textDecoration: "none" }}>
-                Browse all creators
-              </Link>
-            </div>
-          </div>
+          <NewMembers users={users} loading={loading} limit={5} />
 
           <div className="card small">
             <h4 style={{ marginTop: 0 }}>Why Jift?</h4>

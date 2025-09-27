@@ -7,6 +7,10 @@ import { useTheme } from "../context/ThemeContext";
 import MeModal from "../components/MeModal";
 import { getFirestore, doc, runTransaction, serverTimestamp } from "firebase/firestore";
 
+// NEW: notifications hook & client
+import useNotifications from "../hooks/useNotifications";
+import { markNotificationRead, markMultipleRead } from "../libs/notificationsClient";
+
 export default function Navbar({ onOpenAuth, onAddTrip, onViewTrips, onViewProfile, onNavigateHome }) {
   const { currentUser, profile, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
@@ -15,35 +19,34 @@ export default function Navbar({ onOpenAuth, onAddTrip, onViewTrips, onViewProfi
   const [showProfileModal, setShowProfileModal] = useState(false);
   const menuRef = useRef(null);
 
+  // NEW: separate state for notification dropdown open
+  const [notifOpen, setNotifOpen] = useState(false);
+  const notifRef = useRef(null);
+
   // local copy of profile so Navbar UI can update immediately after save
   const [localProfile, setLocalProfile] = useState(profile);
 
   // keep localProfile synced with upstream profile when it changes
-  useEffect(() => {
-    setLocalProfile(profile);
-  }, [profile]);
+  useEffect(() => setLocalProfile(profile), [profile]);
 
-  // Listen for app-level profile updates (dispatched after save)
-  useEffect(() => {
-    const handler = (e) => {
-      const updated = e?.detail;
-      if (!updated) return;
-      if (currentUser && currentUser.uid && (updated.uid === currentUser.uid || updated.uid === profile?.uid || !updated.uid)) {
-        setLocalProfile((prev) => ({ ...prev, ...updated }));
-      }
-    };
-    window.addEventListener("jift:profileUpdated", handler);
-    return () => window.removeEventListener("jift:profileUpdated", handler);
-  }, [currentUser, profile]);
+  // useNotifications provides real-time notifications + unread count
+  const { notifications, loading: notifLoading, unreadCount } = useNotifications({ limitResults: 20 });
 
+  // close menus when clicking outside or pressing Escape (also handle notif dropdown)
   useEffect(() => {
     const onDocClick = (e) => {
       if (menuRef.current && !menuRef.current.contains(e.target)) {
         setOpen(false);
       }
+      if (notifRef.current && !notifRef.current.contains(e.target)) {
+        setNotifOpen(false);
+      }
     };
     const onKey = (e) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        setOpen(false);
+        setNotifOpen(false);
+      }
     };
     document.addEventListener("click", onDocClick);
     document.addEventListener("keydown", onKey);
@@ -58,21 +61,22 @@ export default function Navbar({ onOpenAuth, onAddTrip, onViewTrips, onViewProfi
     setOpen((s) => !s);
   };
 
+  const handleToggleNotif = (e) => {
+    e?.preventDefault?.();
+    setNotifOpen((s) => !s);
+  };
+
+  // existing handlers (unchanged)...
   const handleAddTrip = () => {
     setOpen(false);
-
-    // If user not signed in, open auth modal (preferred) so they can login first.
     if (!currentUser || !currentUser.uid) {
-      // prefer prop-based handler if provided, otherwise use local fallback
       if (typeof onOpenAuth === "function") {
         onOpenAuth("login");
       } else {
-        // fallback: dispatch the same event the rest of the app listens for
         window.dispatchEvent(new CustomEvent("jift:openAuth", { detail: { section: "login" } }));
       }
       return;
     }
-
     if (typeof onAddTrip === "function") {
       onAddTrip();
     } else {
@@ -81,12 +85,9 @@ export default function Navbar({ onOpenAuth, onAddTrip, onViewTrips, onViewProfi
     }
   };
 
-
   const handleViewTrips = () => {
     setOpen(false);
-
     const rawHandle = localProfile?.handle || (currentUser?.email && currentUser.email.split("@")[0]);
-
     if (!rawHandle) {
       try {
         if (typeof onNavigateHome === "function") {
@@ -99,14 +100,11 @@ export default function Navbar({ onOpenAuth, onAddTrip, onViewTrips, onViewProfi
       }
       return;
     }
-
     const handleWithAt = ensureAt(rawHandle);
-
     if (typeof onViewTrips === "function") {
       onViewTrips(handleWithAt);
       return;
     }
-
     try {
       const withoutAt = normalizeHandle(handleWithAt);
       const encoded = encodeURIComponent(withoutAt);
@@ -118,9 +116,7 @@ export default function Navbar({ onOpenAuth, onAddTrip, onViewTrips, onViewProfi
 
   const handleViewProfile = () => {
     setOpen(false);
-
     const rawHandle = localProfile?.handle || (currentUser?.email && currentUser.email.split("@")[0]);
-
     if (!rawHandle) {
       try {
         if (typeof onNavigateHome === "function") {
@@ -133,14 +129,11 @@ export default function Navbar({ onOpenAuth, onAddTrip, onViewTrips, onViewProfi
       }
       return;
     }
-
     const handleWithAt = ensureAt(rawHandle);
-
     if (typeof onViewProfile === "function") {
       onViewProfile(handleWithAt);
       return;
     }
-
     try {
       const withoutAt = normalizeHandle(handleWithAt);
       const encoded = encodeURIComponent(withoutAt);
@@ -182,7 +175,7 @@ export default function Navbar({ onOpenAuth, onAddTrip, onViewTrips, onViewProfi
     }
   };
 
-  // Save handler (inside component so it can access currentUser/profile/localProfile)
+  // Save handler (unchanged)
   const handleSaveProfileToFirestore = async (updatedProfile) => {
     // Debug logs (remove in production if desired)
     console.log("DEBUG: currentUser:", currentUser);
@@ -274,6 +267,40 @@ export default function Navbar({ onOpenAuth, onAddTrip, onViewTrips, onViewProfi
     }
   };
 
+  // ---------- Notification actions ----------
+  async function handleMarkSingleRead(id) {
+    // optimistic update locally (optional)
+    // Fire-and-forget callable; errors logged to console
+    try {
+      await markNotificationRead(id);
+    } catch (err) {
+      console.error("markNotificationRead failed", err);
+    }
+  }
+
+  async function handleMarkAllRead() {
+    const ids = notifications.filter((n) => !n.read).map((n) => n.id);
+    if (!ids.length) return;
+    try {
+      // prefer server-side batch callable if available
+      await markMultipleRead(ids);
+    } catch (err) {
+      // fallback: call single-mark repeatedly
+      try {
+        await Promise.all(ids.map((id) => markNotificationRead(id)));
+      } catch (err2) {
+        console.error("mark all read failed", err2);
+      }
+    }
+  }
+
+  // helper to format createdAt timestamps
+  function formatDate(ts) {
+    if (!ts) return "";
+    if (typeof ts.toDate === "function") return ts.toDate().toLocaleString();
+    return new Date(ts).toLocaleString();
+  }
+
   return (
     <>
       <nav className="navbar" style={{ zIndex: 1000 }}>
@@ -298,6 +325,71 @@ export default function Navbar({ onOpenAuth, onAddTrip, onViewTrips, onViewProfi
             {theme === "light" ? "🌙" : "☀️"}
           </button>
 
+          {/* ---------- Notification bell ---------- */}
+          <div className="notif-wrapper" ref={notifRef} style={{ position: "relative" }}>
+            <button
+              className="notif-bell"
+              onClick={handleToggleNotif}
+              type="button"
+              aria-haspopup="true"
+              aria-expanded={notifOpen}
+              aria-label="Open notifications"
+            >
+              🔔
+              {unreadCount > 0 && (
+                <span className="notif-badge" aria-hidden="true">{unreadCount}</span>
+              )}
+            </button>
+
+            {notifOpen && (
+              <div className="notif-dropdown" role="menu" aria-label="Notifications">
+                <div className="notif-dropdown-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px" }}>
+                  <strong>Notifications</strong>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => setNotifOpen(false)} type="button" className="notif-action">
+                      X
+                    </button>
+
+                  </div>
+                </div>
+
+                <div className="notif-list" style={{ maxHeight: 320, overflowY: "auto" }}>
+                  {notifLoading && <div className="muted" style={{ padding: 12 }}>Loading…</div>}
+
+                  {!notifLoading && notifications.length === 0 && (
+                    <div className="muted" style={{ padding: 12 }}>No notifications.</div>
+                  )}
+
+                  {notifications.map((n) => (
+                    <div key={n.id} className={`notif-item ${n.read ? "read" : "unread"}`} style={{ padding: 10, borderBottom: "1px solid #eee", display: "flex", justifyContent: "space-between", gap: 12 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: n.read ? 400 : 600 }}>{n.title || "Notification"}</div>
+                        <div style={{ color: "#444", fontSize: 13, whiteSpace: "normal", overflowWrap: "break-word" }}>{n.text}</div>
+                        <div style={{ fontSize: 12, color: "#888" }}>{formatDate(n.createdAt)}</div>
+                      </div>
+
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
+                        {!n.read && (
+                          <button
+                            onClick={() => handleMarkSingleRead(n.id)}
+                            type="button"
+                            className="small"
+                          >
+                            Mark read
+                          </button>
+                        )}
+                        {n.url && (
+                          <a href={n.url} target="_blank" rel="noopener noreferrer">Open</a>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ---------- User menu ---------- */}
           {currentUser ? (
             <div className="user-menu" ref={menuRef}>
               <button

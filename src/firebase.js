@@ -1,7 +1,8 @@
 // src/firebase.js
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+// changed: import initializeFirestore as well as getFirestore
+import { initializeFirestore, getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getAnalytics } from "firebase/analytics";
 
@@ -13,7 +14,7 @@ const firebaseConfig = {
   apiKey: "AIzaSyA902QydwbyByIH3HIObTao1t-wjvrhoPc",
   authDomain: "travel-6c761.firebaseapp.com",
   projectId: "travel-6c761",
-  storageBucket: "travel-6c761.appspot.com",
+  storageBucket: "travel-6c761.firebasestorage.app",
   messagingSenderId: "547051952230",
   appId: "1:547051952230:web:050c3c320ce24fe21135a7",
   measurementId: "G-V4KYBY84GW",
@@ -58,9 +59,24 @@ if (isConfigured) {
 }
 
 // Export services (or null if Firebase isn't configured)
+// changed: attempt initializeFirestore with experimentalForceLongPolling (fix for streaming transport errors on some hosts).
+// If that fails for any reason, fall back to getFirestore(app).
+let firestoreInstance = null;
+if (app) {
+  try {
+    // Force long-polling to avoid streaming errors on some hosting / proxy setups (cPanel, certain reverse proxies, mod_security)
+    firestoreInstance = initializeFirestore(app, {
+      experimentalForceLongPolling: true,
+    });
+  } catch (e) {
+    // If initializeFirestore isn't available or throws, fall back to regular getFirestore
+    firestoreInstance = getFirestore(app);
+  }
+}
+
 export const firebaseApp = app;
 export const auth = app ? getAuth(app) : null;
-export const db = app ? getFirestore(app) : null;
+export const db = firestoreInstance;
 export const storage = app ? getStorage(app) : null;
 export const firebaseAnalytics = analytics;
 

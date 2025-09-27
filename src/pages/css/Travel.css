@@ -709,3 +709,40 @@ button:focus,
     opacity: 1;
   }
 }
+
+/* ---------------------------
+   Sightseeing dark-theme fixes
+   --------------------------- */
+
+/* Sightseeing card dark theme fixes */
+.dark-theme .sightseeing-panel .sight-card {
+  background: rgba(255, 255, 255, 0.05);
+  /* subtle card background */
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: var(--text);
+}
+
+.dark-theme .sightseeing-panel .sight-card .sight-name {
+  color: var(--text) !important;
+  /* main name strong */
+  font-weight: 600;
+}
+
+.dark-theme .sightseeing-panel .sight-card .sight-meta {
+  color: var(--muted) !important;
+  /* lighter info text */
+  font-size: 12px;
+}
+
+.dark-theme .sightseeing-panel .sight-card button,
+.dark-theme .sightseeing-panel .sight-card .btn-secondary {
+  color: var(--text) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 6px;
+}
+
+.dark-theme .sightseeing-panel .sight-card button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}

@@ -1,4 +1,4 @@
-// src/pages/Travel.jsx
+// src/pages/Travel.js
 import React, { useEffect, useRef, useState, useMemo } from "react";
 import "./css/Travel.css";
 import Modal from "../components/Modal";
@@ -9,11 +9,15 @@ import TripsList, { isTripActive, formatDateForUI, parseDateToMs, toMillis } fro
 import MapPanel, { extractEmbedSrc } from "../components/MapPanel";
 import LiveVideoPanel from "../components/LiveVideoPanel";
 import ItineraryPanel, { AddItineraryForm } from "../components/ItineraryPanel";
-import GalleryPanel, { uploadAndSaveMedia } from "../components/GalleryPanel";
+import GalleryPanel from "../components/GalleryPanel";
 import { safeShare } from "../utils/share";
 import LiveLocationPanel from '../components/LiveLocationPanel';
+import SightseeingPanel from '../components/SightseeingPanel';
+import { uploadFileAndSaveMeta } from "../utils/storageUploads";
+import { loadTripBySlug } from "../utils/loadTripBySlug";
+import ShareModal from "../components/ShareModal"; // add import
 
-import { onAuthStateChanged /* no auto-anon here */, getAuth } from "firebase/auth";
+import { onAuthStateChanged, getAuth } from "firebase/auth";
 import {
   collection,
   doc,
@@ -30,7 +34,6 @@ import {
   setDoc,
   serverTimestamp
 } from "firebase/firestore";
-import bikeGif from "../assets/bike-running.gif";
 
 import { firebaseApp, auth, db, storage, isFirebaseConfigured } from "../firebase";
 
@@ -56,21 +59,68 @@ function slugify(text = "") {
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
 }
-// Resolve a handle (without @) -> uid using the handles collection (normalized)
+
+// Uploads array of media items (items may have {file}) and returns the resulting array
+async function uploadAndSaveMedia(items = [], tripId, user) {
+  if (!Array.isArray(items) || items.length === 0) return items;
+  if (!useFirebase || !user || !tripId) {
+    // strip file objects and return
+    return items.map((it) => {
+      const copy = { ...it };
+      if (copy.file) delete copy.file;
+      return copy;
+    });
+  }
+
+  const out = [];
+  for (const it of items) {
+    try {
+      if (it && it.file) {
+        const result = await uploadFileAndSaveMeta(it.file, tripId, user, null);
+        const final = {
+          id: result.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          name: result.name || it.name || it.file?.name || "file",
+          type: result.type || (it.type || (it.file && it.file.type && it.file.type.startsWith("video") ? "video" : "image")),
+          url: result.url || result.storageUrl || "",
+          storagePath: result.storagePath || result.path || null,
+          date: result.date || result.uploadedAt || new Date().toISOString(),
+          gps: result.gps || it.gps || null,
+          uploadedBy: result.uploadedBy || user?.uid || null,
+          uploadedAt: result.uploadedAt || new Date().toISOString(),
+          _persisted: !!result._firestorePersisted,
+        };
+
+        out.push(final);
+      } else {
+        const copy = { ...it };
+        if (copy.file) delete copy.file;
+        out.push(copy);
+      }
+    } catch (err) {
+      console.error("uploadAndSaveMedia: upload failed for item", it?.name, err);
+      const safe = { ...it };
+      if (safe.file) delete safe.file;
+      safe.uploaded = false;
+      safe.uploadError = true;
+      out.push(safe);
+    }
+  }
+  return out;
+}
+
+// Resolve handle -> uid helpers (used by edit modal)
 const resolveHandleToUidLocal = async (handleNoAt) => {
   try {
     if (!db || !handleNoAt) return null;
     const key = normalizeHandle(String(handleNoAt || ""));
     if (!key) return null;
 
-    // preferred: doc id on `handles`
     const hSnap = await getDoc(doc(db, "handles", key));
-    if (hSnap && typeof hSnap.exists === "function" ? hSnap.exists() : !!hSnap.exists) {
+    if (hSnap && hSnap.exists()) {
       const d = hSnap.data();
       return d?.uid ?? d?.userId ?? d?.id ?? null;
     }
 
-    // fallback: handles collection might store handle as a field
     const q = query(collection(db, "handles"), where("handle", "==", key));
     const snaps = await getDocs(q);
     if (snaps && !snaps.empty) {
@@ -78,7 +128,6 @@ const resolveHandleToUidLocal = async (handleNoAt) => {
       return d?.uid ?? d?.userId ?? d?.id ?? null;
     }
 
-    // fallback: users collection may have the handle
     const q2 = query(collection(db, "users"), where("handle", "==", key), orderBy("createdAt", "desc"));
     const snaps2 = await getDocs(q2);
     if (snaps2 && !snaps2.empty) {
@@ -92,30 +141,24 @@ const resolveHandleToUidLocal = async (handleNoAt) => {
   }
 };
 
-// Resolve UID -> handle (prefer doc id in handles collection where uid == <uid>)
 const resolveUidToHandleLocal = async (uid) => {
   try {
     if (!db || !uid) return null;
-
-    // query handles where uid == uid
     const q = query(collection(db, "handles"), where("uid", "==", uid));
     const snaps = await getDocs(q);
     if (snaps && !snaps.empty) {
-      // prefer doc id (common pattern: doc id = handle)
       const first = snaps.docs[0];
       if (first && first.id) return first.id;
       const d = first.data();
       return d?.handle ?? d?.name ?? null;
     }
 
-    // fallback: users doc with id==uid might contain handle
     const uSnap = await getDoc(doc(db, "users", uid));
-    if (uSnap && typeof uSnap.exists === "function" ? uSnap.exists() : !!uSnap.exists) {
+    if (uSnap && uSnap.exists()) {
       const data = uSnap.data();
       return data?.handle ?? data?.username ?? null;
     }
 
-    // fallback: users where uid field equals uid
     const q2 = query(collection(db, "users"), where("uid", "==", uid));
     const snaps2 = await getDocs(q2);
     if (snaps2 && !snaps2.empty) {
@@ -131,7 +174,6 @@ const resolveUidToHandleLocal = async (uid) => {
 };
 
 
-/* ---------- component ---------- */
 export default function Travel({ externalHandle = null, externalSlug = null }) {
   const navigate = useNavigate();
   const params = useParams();
@@ -157,9 +199,6 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
   const watchIdRef = useRef(null);
   const [itinerary, setItinerary] = useState([]);
   const [media, setMedia] = useState([]);
-  const localVideoRef = useRef(null);
-  const pcRef = useRef(null);
-  const [isBroadcasting, setIsBroadcasting] = useState(false);
   const [savedTrips, setSavedTrips] = useState([]);
   const [selectedTripId, setSelectedTripId] = useState(null);
   const [user, setUser] = useState(null);
@@ -182,8 +221,12 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
   const [followLoading, setFollowLoading] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
   const [followerCount, setFollowerCount] = useState(0);
-
-  // load trip by slug from Firestore and apply visibility checks
+  const [savedSights, setSavedSights] = useState([]);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareFollowers, setShareFollowers] = useState([]);
+  const [shareModalContext, setShareModalContext] = useState({ isProfile: true, handle: "", tripName: "" });
+  const [loadingFollowers, setLoadingFollowers] = useState(false);
+  // load trip by slug from Firestore and apply visibility checks (this is your original flow)
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -196,101 +239,102 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
           return;
         }
 
-        // wait until resolvedUid exists (owner uid for the handle)
-        if (!resolvedUid) return;
-
-        // first try: trip owned by profile with this slug
-        const tripsCol = collection(db, "trips");
-        const qOwnerSlug = query(tripsCol, where("owner_id", "==", resolvedUid), where("slug", "==", slug));
-        const snaps = await getDocs(qOwnerSlug);
-        if (cancelled) return;
-
-        let tripDoc = null;
-        if (snaps && !snaps.empty) {
-          const d = snaps.docs[0];
-          tripDoc = { trip_id: d.id, ...d.data() };
-        } else {
-          // fallback: any trip with that slug
-          const qAnySlug = query(tripsCol, where("slug", "==", slug));
-          const snapsAny = await getDocs(qAnySlug);
+        // Wait until resolvedUid exists (owner uid for the handle),
+        // but don't block forever — if handleless slug, we still attempt load
+        // (in case you have slug-only URLs that map globally).
+        // So only block if route uses handle-based pages and resolvedUid is required.
+        // If your UX requires resolvedUid before a slug lookup, keep the earlier guard.
+        // For now: try to load slug mapping immediately.
+        try {
+          // Use the safe helper (slugs/{slug} -> trips/{tripId})
+          const tripData = await loadTripBySlug(slug);
           if (cancelled) return;
-          if (snapsAny && !snapsAny.empty) {
-            const d = snapsAny.docs[0];
-            tripDoc = { trip_id: d.id, ...d.data() };
-          }
-        }
 
-        if (!tripDoc) {
-          if (!cancelled) setNotFound(true);
-          return;
-        }
-
-        const visibility = tripDoc.visibility || (tripDoc.private ? "private" : "public");
-        const ownerId = tripDoc.owner_id || tripDoc.ownerId || null;
-        const allowedUsers = Array.isArray(tripDoc.allowedUsers) ? tripDoc.allowedUsers : (tripDoc.allowed_users || []);
-
-        const isOwnerLocal = user && ownerId && user.uid === ownerId;
-        const isAllowed = user && ownerId && Array.isArray(allowedUsers) && allowedUsers.includes(user.uid);
-
-        if (visibility === "private" && !isOwnerLocal && !isAllowed) {
-          if (!cancelled) {
-            setNotFound(true);
-            setToast({ msg: "This trip is private", type: "warning" });
-            setTimeout(() => setToast(null), 2000);
-          }
-          return;
-        }
-
-        if (!cancelled) {
+          // tripData returned by loadTripBySlug should include id/data or throw
           const normalized = {
-            trip_id: tripDoc.trip_id || tripDoc.id || tripDoc.tripId || `trip_local_${Date.now()}`,
-            title: tripDoc.title || tripDoc.name || tripDoc.slug || "Untitled Trip",
-            start_date: tripDoc.startDate || tripDoc.start_date || "",
-            end_date: tripDoc.endDate || tripDoc.end_date || null,
-            private: (tripDoc.visibility === "private") || !!tripDoc.private,
-            itinerary: tripDoc.itinerary || [],
-            media: tripDoc.media || [],
-            last_position: tripDoc.last_position || tripDoc.lastPosition || null,
-            created_at: tripDoc.createdAt || tripDoc.created_at || new Date().toISOString(),
-            ownerId: ownerId,
-            visibility: visibility,
-            allowedUsers: allowedUsers,
-            ...tripDoc,
+            trip_id: tripData.id || tripData.trip_id || tripData.tripId || `trip_local_${Date.now()}`,
+            title: tripData.title || tripData.name || tripData.slug || "Untitled Trip",
+            start_date: tripData.startDate || tripData.start_date || "",
+            end_date: tripData.endDate || tripData.end_date || null,
+            private: (tripData.visibility === "private") || !!tripData.private,
+            itinerary: tripData.itinerary || [],
+            media: tripData.media || [],
+            last_position: tripData.last_position || tripData.lastPosition || null,
+            created_at: tripData.createdAt || tripData.created_at || new Date().toISOString(),
+            ownerId: tripData.owner_id || tripData.ownerId || null,
+            visibility: tripData.visibility || (tripData.private ? "private" : "public"),
+            allowedUsers: Array.isArray(tripData.allowedUsers) ? tripData.allowedUsers : [],
+            ...tripData,
           };
 
-          setSelectedTripId(normalized.trip_id);
-          setSelectedTrip(normalized);
-          setTripTitle(normalized.title || "");
-          setTripStart(normalized.start_date || "");
-          setTripEnd(normalized.end_date || "");
-          setTripPrivate(!!normalized.private);
-          setItinerary(Array.isArray(normalized.itinerary) ? normalized.itinerary : []);
-          setTripStartLocation(normalized.startLocation || normalized.start_location || "");
-          setTripDestination(normalized.destination || normalized.dest || "");
-          setTripNotes(normalized.notes || "");
-          setMedia(
-            (normalized.media || []).map((x) => ({
-              id: x.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              type: x.type || "image",
-              url: x.storageUrl || x.url || "",
-              name: x.name || "",
-              date: x.date || new Date().toISOString(),
-            }))
-          );
-          if (normalized.last_position) setPosition(normalized.last_position);
+          // Apply visibility checks on client for UX (server rules enforce real security)
+          const ownerId = normalized.ownerId;
+          const allowedUsers = normalized.allowedUsers || [];
+          const isOwnerLocal = user && ownerId && user.uid === ownerId;
+          const isAllowed = user && Array.isArray(allowedUsers) && allowedUsers.includes(user.uid);
 
-          // ensure URL matches (optional)
-          try {
-            const handlePart = normalizeHandle(profile?.handle || routeHandle || "");
-            const basePath = handlePart ? `/Travel/@${handlePart}` : "/Travel";
-            const slugToUse = normalized.slug || slugify(normalized.title || "") || normalized.trip_id;
-            navigate(`${basePath}/${slugToUse}`, { replace: true });
-          } catch (err) {
-            // ignore navigation errors
+          if (normalized.visibility === "private" && !isOwnerLocal && !isAllowed) {
+            if (!cancelled) {
+              setNotFound(true);
+              setToast({ msg: "This trip is private", type: "warning" });
+              setTimeout(() => setToast(null), 2000);
+            }
+            return;
+          }
+
+          if (!cancelled) {
+            setSelectedTripId(normalized.trip_id);
+            setSelectedTrip(normalized);
+            setTripTitle(normalized.title || "");
+            setTripStart(normalized.start_date || "");
+            setTripEnd(normalized.end_date || "");
+            setTripPrivate(!!normalized.private);
+            setItinerary(Array.isArray(normalized.itinerary) ? normalized.itinerary : []);
+            setTripStartLocation(normalized.startLocation || normalized.start_location || "");
+            setTripDestination(normalized.destination || normalized.dest || "");
+            setTripNotes(normalized.notes || "");
+            setMedia(
+              (normalized.media || []).map((x) => ({
+                id: x.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                type: x.type || "image",
+                url: x.storageUrl || x.url || "",
+                name: x.name || "",
+                date: x.date || new Date().toISOString(),
+              }))
+            );
+            if (normalized.last_position) setPosition(normalized.last_position);
+
+            // sync URL to canonical slug (no-op if identical)
+            try {
+              const handlePart = normalizeHandle(profile?.handle || routeHandle || "");
+              const basePath = handlePart ? `/Travel/@${handlePart}` : "/Travel";
+              const slugToUse = normalized.slug || slugify(normalized.title || "") || normalized.trip_id;
+              navigate(`${basePath}/${slugToUse}`, { replace: true });
+            } catch (err) {
+              // ignore navigation errors
+            }
+          }
+        } catch (err) {
+          // loadTripBySlug will throw on missing slug or permission-denied on trip get
+          console.error("[Travel] loadTripBySlug error:", err);
+          if (cancelled) return;
+
+          // Prefer to show "not found" for missing slug, but distinguish permission errors to help debugging
+          const code = err?.code || "";
+          const msg = (err && err.message) || String(err);
+
+          if (code === "permission-denied" || msg.toLowerCase().includes("permission") || msg.toLowerCase().includes("denied")) {
+            // Firestore rejected the trip get — likely private/restricted or rules issue
+            setNotFound(true);
+            setToast({ msg: "Access denied to this trip (private or insufficient permissions)", type: "warning" });
+            setTimeout(() => setToast(null), 3000);
+          } else {
+            // fallback: slug missing or other error
+            setNotFound(true);
           }
         }
       } catch (err) {
-        console.error("[Travel] load trip by slug error:", err);
+        console.error("[Travel] unexpected slug loader error:", err);
         if (!cancelled) setNotFound(true);
       }
     })();
@@ -298,8 +342,9 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
     return () => {
       cancelled = true;
     };
-  }, [resolvedUid, routeSlug, user, profile, useFirebase, db, navigate]); // include navigate
+  }, [routeSlug, user, profile, useFirebase, db, navigate, routeHandle]);
 
+  // followers and follow state snapshots
   useEffect(() => {
     if (!useFirebase || !db || !user || !resolvedUid) return;
     const followDoc = doc(db, "follows", `${user.uid}_${resolvedUid}`);
@@ -309,12 +354,11 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
     return () => unsub && unsub();
   }, [db, user, resolvedUid]);
 
-
   useEffect(() => {
     if (!useFirebase || !db || !resolvedUid) return;
     const q = query(collection(db, "follows"), where("followeeId", "==", resolvedUid));
     const unsub = onSnapshot(q, (snap) => {
-      setFollowerCount(snap.size); // cheap for small counts; consider aggregation for large apps
+      setFollowerCount(snap.size);
     }, (err) => console.error("followers count snapshot failed", err));
     return () => unsub && unsub();
   }, [db, resolvedUid]);
@@ -359,41 +403,7 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
     }
   }
 
-  // ---------- helper: visibility ----------
-  function getVisibilityInfo(trip, user) {
-    if (!trip) return { icon: "❓", label: "Unknown" };
-    const visibility = trip.visibility || (trip.private ? "private" : "public");
-    const isOwnerLocal = user && (trip.ownerId === user.uid || trip.owner_id === user.uid);
-
-    if (visibility === "public") {
-      return { icon: "🌐", label: "Public" };
-    }
-
-    if (visibility === "restricted") {
-      if (isOwnerLocal) return { icon: "🔑", label: "Restricted (you own this)" };
-      if (Array.isArray(trip.allowedUsers) && user && trip.allowedUsers.includes(user.uid)) {
-        return { icon: "🔑", label: "Restricted (you have access)" };
-      }
-      return { icon: "🔑", label: "Restricted" };
-    }
-
-    if (visibility === "private") {
-      if (isOwnerLocal) return { icon: "🔒", label: "Private (you own this)" };
-      if (Array.isArray(trip.allowedUsers) && user && trip.allowedUsers.includes(user.uid)) {
-        return { icon: "🔑", label: "Restricted (you have access)" };
-      }
-      return { icon: "🔒", label: "Private" };
-    }
-
-    return { icon: "❓", label: "Unknown" };
-  }
-
-
-  useEffect(() => {
-    // mount debug
-  }, []);
-
-  /* ---------- resolve handle -> uid ---------- */
+  // ---------- handle -> uid resolution ----------
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -428,7 +438,7 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
           const handleSnap = await getDoc(handleRef);
           if (cancelled) return;
 
-          if (handleSnap && typeof handleSnap.exists === "function" && handleSnap.exists()) {
+          if (handleSnap && handleSnap.exists()) {
             const data = handleSnap.data();
             const uid = data?.uid ?? null;
             if (!uid) {
@@ -481,7 +491,7 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
         const uref = doc(db, "users", resolvedUid);
         const snap = await getDoc(uref);
         if (cancelled) return;
-        if (snap && typeof snap.exists === "function" && snap.exists()) {
+        if (snap && snap.exists()) {
           setProfile(snap.data());
           setIsPublicView(true);
           setNotFound(false);
@@ -512,10 +522,8 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
     let cancelled = false;
     let tripsUnsub = null;
     let authUnsub = null;
+    const tripsMap = new Map();
 
-    const tripsMap = new Map(); // to merge multiple listeners
-
-    // Normalizer for snapshot docs -> trip objects
     const processSnapshot = (snapshot) => {
       return snapshot.docs.map((d) => {
         const data = d.data() || {};
@@ -562,7 +570,7 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
       });
 
       setSavedTrips(arr);
-      // if a slug is present in the URL, try to auto-select the matching trip
+
       if (routeSlug) {
         try {
           const bySlug = arr.find(
@@ -573,7 +581,6 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
               t.trip_id === routeSlug
           );
           if (bySlug) {
-            // set selected trip (merge ensures consistent state)
             setSelectedTripId(bySlug.trip_id);
             setSelectedTrip(bySlug);
             setTripTitle(bySlug.title || "");
@@ -599,7 +606,6 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
           console.warn("[Travel] routeSlug auto-select failed:", err);
         }
       }
-
 
       try {
         if (selectedTripId) {
@@ -680,17 +686,14 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
     };
 
     const setupSubscriptions = (currentUser) => {
-      // clean up previous listeners if any
       if (tripsUnsub) {
-        try { tripsUnsub(); } catch (e) { /* ignore */ }
+        try { tripsUnsub(); } catch (e) { }
       }
       tripsMap.clear();
 
       const unsubscribers = [];
-
       const ownerId = resolvedUid || (currentUser && currentUser.uid) || null;
       if (!ownerId) {
-        // no owner to subscribe to -> clear UI
         setSavedTrips([]);
         tripsUnsub = null;
         return;
@@ -698,7 +701,6 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
 
       const isViewerOwner = currentUser && currentUser.uid === ownerId;
 
-      // 1) Owner-all subscription (only for owner)
       if (isViewerOwner) {
         try {
           const qOwnerAll = query(
@@ -719,9 +721,7 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
             },
             (err) => {
               if (err?.code === "permission-denied") {
-                console.warn(
-                  `[Travel] Permission denied while subscribing to owner-all trips for ownerId=${ownerId}.`
-                );
+                console.warn(`[Travel] Permission denied while subscribing to owner-all trips for ownerId=${ownerId}.`);
                 return;
               }
               console.error("[Travel] owner-all trips subscription failed:", err);
@@ -736,8 +736,6 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
         }
       }
 
-      // 2) Public trips for this owner (always subscribe for non-owner viewers and anonymous)
-      //    If viewer is the owner, this is redundant but harmless; we only add it when not owner to avoid duplication.
       if (!isViewerOwner) {
         try {
           const qPublic = query(
@@ -759,7 +757,6 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
             },
             (err) => {
               if (err?.code === "permission-denied") {
-                // public should normally be readable, but handle gracefully
                 console.warn(`[Travel] Permission denied while subscribing to public trips for ownerId=${ownerId}.`);
                 return;
               }
@@ -775,7 +772,6 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
         }
       }
 
-      // 3) Allowed trips subscription (for viewers who are specifically allowed)
       if (!(currentUser && currentUser.uid === ownerId) && currentUser && currentUser.uid) {
         try {
           const qAllowed = query(
@@ -797,9 +793,7 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
             },
             (err) => {
               if (err?.code === "permission-denied") {
-                console.warn(
-                  `[Travel] Permission denied while subscribing to allowed trips for ownerId=${ownerId} (viewer=${currentUser?.uid}).`
-                );
+                console.warn(`[Travel] Permission denied while subscribing to allowed trips for ownerId=${ownerId} (viewer=${currentUser?.uid}).`);
                 return;
               }
               console.error("allowed trips onSnapshot error", err);
@@ -814,11 +808,10 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
         }
       }
 
-      // Save a combined unsubscribe function
       tripsUnsub = () => {
         try {
-          unsubscribers.forEach((u) => { try { u && u(); } catch (e) { /* ignore */ } });
-        } catch (e) { /* ignore */ }
+          unsubscribers.forEach((u) => { try { u && u(); } catch (e) { } });
+        } catch (e) { }
       };
     };
 
@@ -842,7 +835,7 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
     };
   }, [resolvedUid]);
 
-  /* ---------- trip:created event handler ---------- */
+  // trip:created handler (for local-created trips or events)
   useEffect(() => {
     let mounted = true;
 
@@ -977,7 +970,123 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
     };
   }, [user]);
 
-  // create a local trip by dispatching `trip:created` event
+  // saved sights listener
+  useEffect(() => {
+    if (!useFirebase || !db || !selectedTrip?.trip_id) {
+      setSavedSights([]);
+      return;
+    }
+
+    const tripId = selectedTrip.trip_id;
+    let q;
+    try {
+      q = query(collection(db, "trips", tripId, "sights"), orderBy("createdAt", "desc"));
+    } catch (err) {
+      q = collection(db, "trips", tripId, "sights");
+    }
+
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        try {
+          const arr = [];
+          snap.forEach((d) => {
+            const data = d.data() || {};
+            arr.push({
+              id: d.id,
+              provider: data.provider || "unknown",
+              placeId: data.placeId || data.place_id || "",
+              name: data.name || "",
+              category: data.category || "",
+              location: data.location || {},
+              photoUrl: data.photoUrl || "",
+              mode: data.mode || "",
+              raw: data,
+            });
+          });
+          setSavedSights(arr);
+        } catch (err) {
+          console.error("[Travel] sights snapshot processing failed:", err);
+          setSavedSights([]);
+        }
+      },
+      (err) => {
+        console.error("[Travel] sights onSnapshot failed:", err);
+      }
+    );
+
+    return () => {
+      try { unsub && unsub(); } catch (e) { }
+    };
+  }, [db, selectedTrip?.trip_id, useFirebase]);
+
+  // Basic trip actions (stop, extend)
+  async function stopTripNow() {
+    if (!selectedTrip || !selectedTrip.trip_id) {
+      setToast({ msg: "No trip selected", type: "warning" }); setTimeout(() => setToast(null), 1400); return;
+    }
+    const isOwnerLocal = user && (selectedTrip.ownerId === user.uid || selectedTrip.owner_id === user.uid);
+    if (!isOwnerLocal) {
+      setToast({ msg: "Only the owner can stop this trip", type: "warning" }); setTimeout(() => setToast(null), 1400); return;
+    }
+
+    const payload = { trip_id: selectedTrip.trip_id, stopped: true, stoppedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    applyLocalEdit(payload);
+    setSelectedTrip((s) => (s ? { ...s, ...payload } : s));
+    setToast({ msg: "Stopping trip...", type: "info" });
+
+    if (useFirebase && db && user) {
+      try {
+        const dr = doc(db, "trips", selectedTrip.trip_id);
+        await updateDoc(dr, { stopped: true, stoppedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+        setToast({ msg: "Trip stopped", type: "success" });
+      } catch (err) {
+        console.error("stopTripNow: firestore update failed", err);
+        setToast({ msg: "Stopped locally (failed to persist)", type: "warning" });
+      }
+    } else {
+      setToast({ msg: "Stopped locally", type: "info" });
+    }
+    setTimeout(() => setToast(null), 1600);
+  }
+
+  async function extendEndBy24Hours() {
+    if (!selectedTrip || !selectedTrip.trip_id) {
+      setToast({ msg: "No trip selected", type: "warning" }); setTimeout(() => setToast(null), 1400); return;
+    }
+    const isOwnerLocal = user && (selectedTrip.ownerId === user.uid || selectedTrip.owner_id === user.uid);
+    if (!isOwnerLocal) {
+      setToast({ msg: "Only the owner can modify this trip", type: "warning" }); setTimeout(() => setToast(null), 1400); return;
+    }
+
+    const endRaw = selectedTrip.endDate ?? selectedTrip.end_date ?? selectedTrip.end_at ?? selectedTrip.endAt;
+    let endMs = parseDateToMs(endRaw);
+    if (!Number.isFinite(endMs)) {
+      endMs = Date.now();
+    }
+    const newEndMs = endMs + 24 * 60 * 60 * 1000;
+    const newEndIso = new Date(newEndMs).toISOString().slice(0, 10);
+
+    const payload = { trip_id: selectedTrip.trip_id, end_date: newEndIso, endDate: newEndIso, updatedAt: new Date().toISOString() };
+    applyLocalEdit(payload);
+    setSelectedTrip((s) => (s ? { ...s, ...payload } : s));
+    setToast({ msg: "End date extended by 24 hours", type: "success" });
+
+    if (useFirebase && db && user) {
+      try {
+        const dr = doc(db, "trips", selectedTrip.trip_id);
+        await updateDoc(dr, { endDate: newEndIso, end_date: newEndIso, updatedAt: new Date().toISOString() });
+        setToast({ msg: "End date updated", type: "success" });
+      } catch (err) {
+        console.error("extendEndBy24Hours: firestore update failed", err);
+        setToast({ msg: "Extended locally (failed to persist)", type: "warning" });
+      }
+    } else {
+      setToast({ msg: "Extended locally", type: "info" });
+    }
+    setTimeout(() => setToast(null), 1600);
+  }
+
   const createLocalTrip = (overrides = {}) => {
     const title = overrides.title || "New Trip";
     const computedSlug = overrides.slug || slugify(title) || localUid("slug");
@@ -991,21 +1100,20 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
       media: [],
       last_position: null,
       created_at: new Date().toISOString(),
+      ownerId: (user && user.uid) || overrides.ownerId || overrides.owner_id || null,
+      owner_id: (user && user.uid) || overrides.ownerId || overrides.owner_id || null,
       ...overrides,
     };
     window.dispatchEvent(new CustomEvent("trip:created", { detail }));
 
-    // update URL to reflect the created trip
     try {
       const handlePart = normalizeHandle(profile?.handle || routeHandle || "");
       const basePath = handlePart ? `/Travel/@${handlePart}` : "/Travel";
       navigate(`${basePath}/${detail.slug}`, { replace: true });
-    } catch (err) {
-      // ignore
-    }
+    } catch (err) { }
   };
 
-  // ---------- NEW: save itinerary to Firestore helper ----------
+  // save itinerary helper
   async function saveItineraryForTrip(tripId, newItinerary) {
     if (!useFirebase || !db) {
       return { ok: false, reason: "no-firebase" };
@@ -1021,26 +1129,10 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
     }
   }
 
-  // open confirm modal for itinerary item
   const confirmDeleteItinerary = (itemId, title = "") => {
     setConfirmItin({ open: true, id: itemId, title });
   };
 
-  // perform confirmed delete
-  const confirmDeleteItineraryConfirmed = async () => {
-    const id = confirmItin.id;
-    setConfirmItin({ open: false, id: null, title: null });
-    if (!id) return;
-    try {
-      await deleteItineraryItem(id);
-    } catch (err) {
-      console.error("confirmed delete failed", err);
-      setToast({ msg: "Failed to delete item", type: "warning" });
-      setTimeout(() => setToast(null), 2000);
-    }
-  };
-
-  // addItinerary: used by modal "Add"
   const addItinerary = async (item) => {
     setItinerary((prev) => {
       const arr = [...(Array.isArray(prev) ? prev : [])];
@@ -1081,7 +1173,6 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
     }
   };
 
-  // ---------- delete itinerary item ----------
   const deleteItineraryItem = async (itemId) => {
     if (!itemId) return;
     setItinerary((prev) => (Array.isArray(prev) ? prev.filter((it) => it.id !== itemId) : prev));
@@ -1143,29 +1234,23 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
     setConfirmDelete({ open: false, id: null });
   }
 
-  // save handler used by EditTripModal
   async function handleSaveEdit(updatedFields) {
     if (!tripToEdit || !tripToEdit.trip_id) return;
     setSavingEdit(true);
     try {
       const merged = { ...tripToEdit, ...updatedFields };
 
-      // If media files were provided in the edit form, upload them first
       if (Array.isArray(merged.media)) {
         const needUpload = merged.media.some((m) => m && m.file);
         if (needUpload && useFirebase && user) {
-          // NOTE: uploadAndSaveMedia was moved to GalleryPanel and exported
           merged.media = await uploadAndSaveMedia(merged.media, merged.trip_id, user);
         }
       }
 
-      // Persist to Firestore if configured and owner
       const isOwnerLocal = user && (merged.ownerId === user.uid || merged.owner_id === user.uid);
       if (useFirebase && user && isOwnerLocal) {
         try {
           const docRef = doc(db, "trips", merged.trip_id);
-          // inside handleSaveEdit, replace the payload object creation with this:
-
           const payload = {
             title: merged.title,
             slug: merged.slug || slugify(merged.title || "") || undefined,
@@ -1177,16 +1262,13 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
             notes: merged.notes || merged.notes || null,
             destination: merged.destination || merged.dest || null,
             startLocation: merged.startLocation || merged.start_location || null,
-            // --- NEW: persist allowedUsers properly when visibility is restricted ---
             allowedUsers:
               (merged.visibility || (merged.private ? "private" : "public")) === "restricted"
-                ? // accept merged.allowedUsers if present, or empty array otherwise
-                (Array.isArray(merged.allowedUsers) ? merged.allowedUsers.slice() : [])
+                ? (Array.isArray(merged.allowedUsers) ? merged.allowedUsers.slice() : [])
                 : [],
             updatedAt: new Date().toISOString(),
           };
 
-          // Ensure owner uid is present in allowedUsers for restricted visibility
           if (payload.visibility === "restricted") {
             try {
               const ownerId = merged.ownerId || merged.owner_id || user?.uid || null;
@@ -1195,9 +1277,7 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
                 set.add(ownerId);
                 payload.allowedUsers = Array.from(set);
               }
-            } catch (err) {
-              // ignore - owner add is a best-effort safety net
-            }
+            } catch (err) { }
           }
 
           Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
@@ -1250,7 +1330,7 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
     setSavedTrips((prev) => prev.map((t) => (t.trip_id === updated.trip_id ? { ...t, ...updated } : t)));
   }
 
-  /* ---------- tracking & media controls (unchanged) ---------- */
+  // tracking helpers
   const startTracking = () => {
     if (!navigator.geolocation) {
       alert("Geolocation not supported by your browser");
@@ -1277,7 +1357,6 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
     }
   };
 
-  // ---------- permissions helper ----------
   const canEditItinerary = useMemo(() => {
     return Boolean(
       !isPublicView ||
@@ -1288,60 +1367,7 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
     );
   }, [isPublicView, user, resolvedUid, selectedTrip]);
 
-  /* ---------- UI helpers ---------- */
-  const loadTrip = (t) => {
-    if (!t) return;
-
-    setSelectedTrip(t);
-    setSelectedTripId(t.trip_id);
-    setTripTitle(t.title || "");
-    setTripStart(t.start_date || t.startDate || "");
-    setTripEnd(t.end_date || t.endDate || "");
-    setTripPrivate(!!t.private);
-    setItinerary(t.itinerary || []);
-    setTripStartLocation(t.startLocation || t.start_location || "");
-    setTripDestination(t.destination || t.dest || "");
-    setTripNotes(t.notes || "");
-    setMedia((t.media || []).map((x) => ({
-      id: x.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      type: x.type || "image",
-      url: x.storageUrl || x.url || "",
-      name: x.name || "",
-      date: x.date || new Date().toISOString(),
-    })));
-    if (t.last_position) setPosition(t.last_position);
-
-    // push slug to URL
-    try {
-      const slug = t.slug || (t.title ? slugify(t.title) : t.trip_id);
-      const handlePart = normalizeHandle(profile?.handle || routeHandle || "");
-      const basePath = handlePart ? `/Travel/@${handlePart}` : "/Travel";
-      navigate(`${basePath}/${slug}`, { replace: true });
-    } catch (err) {
-      console.warn("[Travel] failed to update URL for trip:", err);
-    }
-  };
-
-
-  /* ---------- render ---------- */
-  if (profileLoading) {
-    return (
-      <div className="travel-container" style={{ padding: 24 }}>
-        <h2>Loading profile…</h2>
-        <p className="muted">handle: @{normalizeHandle(routeHandle)}</p>
-      </div>
-    );
-  }
-
-  if (notFound) {
-    return (
-      <div className="travel-container" style={{ padding: 24 }}>
-        <h2>No user found for @{normalizeHandle(routeHandle)}</h2>
-        <p className="muted">Make sure the handle is correct and exists in Firestore.</p>
-      </div>
-    );
-  }
-
+  // follow/unfollow
   async function toggleFollow() {
     if (!resolvedUid || !user || !user.uid) {
       setToast({ msg: "Sign in to follow", type: "warning" }); setTimeout(() => setToast(null), 1400);
@@ -1362,12 +1388,10 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
     setFollowLoading(true);
     try {
       if (isFollowing) {
-        // unfollow: delete follow doc (allowed because follower == auth.uid)
         await deleteDoc(followRef);
         setIsFollowing(false);
         setToast({ msg: "Unfollowed", type: "info" });
       } else {
-        // follow: create follow doc
         await setDoc(followRef, { followerId: user.uid, followeeId: resolvedUid, createdAt: serverTimestamp() });
         setIsFollowing(true);
         setToast({ msg: "Now following", type: "success" });
@@ -1404,6 +1428,127 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
     return { key: "ongoing", label: "Ongoing (paused)", icon: "⏸️", color: "orange" };
   }
 
+  const GRACE_MS = 5 * 60 * 60 * 1000;
+  function checkEndDateGrace(trip, now = Date.now()) {
+    if (!trip) return { inGrace: false, expiredAtMs: NaN, remainingMs: 0 };
+    const endRaw = trip.endDate ?? trip.end_date ?? trip.end_at ?? trip.endAt;
+    const endMs = parseDateToMs(endRaw);
+    if (!Number.isFinite(endMs)) return { inGrace: false, expiredAtMs: NaN, remainingMs: 0 };
+    if (now <= endMs) return { inGrace: false, expiredAtMs: endMs, remainingMs: endMs - now };
+
+    const elapsedSinceEnd = now - endMs;
+    if (elapsedSinceEnd > 0 && elapsedSinceEnd <= GRACE_MS) {
+      return { inGrace: true, expiredAtMs: endMs, remainingMs: Math.max(0, GRACE_MS - elapsedSinceEnd) };
+    }
+    return { inGrace: false, expiredAtMs: endMs, remainingMs: 0 };
+  }
+
+  // loadTrip UI helpers
+  const loadTrip = (t) => {
+    if (!t) return;
+
+    setSelectedTrip(t);
+    setSelectedTripId(t.trip_id);
+    setTripTitle(t.title || "");
+    setTripStart(t.start_date || t.startDate || "");
+    setTripEnd(t.end_date || t.endDate || "");
+    setTripPrivate(!!t.private);
+    setItinerary(t.itinerary || []);
+    setTripStartLocation(t.startLocation || t.start_location || "");
+    setTripDestination(t.destination || t.dest || "");
+    setTripNotes(t.notes || "");
+    setMedia((t.media || []).map((x) => ({
+      id: x.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type: x.type || "image",
+      url: x.storageUrl || x.url || "",
+      name: x.name || "",
+      date: x.date || new Date().toISOString(),
+    })));
+    if (t.last_position) setPosition(t.last_position);
+
+    try {
+      const slug = t.slug || (t.title ? slugify(t.title) : t.trip_id);
+      const handlePart = normalizeHandle(profile?.handle || routeHandle || "");
+      const basePath = handlePart ? `/Travel/@${handlePart}` : "/Travel";
+      navigate(`${basePath}/${slug}`, { replace: true });
+    } catch (err) {
+      console.warn("[Travel] failed to update URL for trip:", err);
+    }
+  };
+  // perform confirmed delete (for itinerary item)
+  const confirmDeleteItineraryConfirmed = async () => {
+    const id = confirmItin.id;
+    setConfirmItin({ open: false, id: null, title: null });
+    if (!id) return;
+    try {
+      await deleteItineraryItem(id);
+    } catch (err) {
+      console.error("confirmed delete failed", err);
+      setToast({ msg: "Failed to delete item", type: "warning" });
+      setTimeout(() => setToast(null), 2000);
+    }
+  };
+  // loads followers (who follow current user) and returns array of {id, displayName, handle, email}
+  // inside Travel component (or a nearby utils area)
+  async function loadFollowersForCurrentUser() {
+    if (!useFirebase || !db || !user || !user.uid) {
+      setShareFollowers([]);
+      return [];
+    }
+    setToast && setToast({ msg: "Loading followers…", type: "info" });
+    try {
+      const q = query(collection(db, "follows"), where("followeeId", "==", user.uid));
+      const snaps = await getDocs(q);
+      const followerIds = [];
+      snaps.forEach((d) => {
+        const data = d.data() || {};
+        if (data.followerId) followerIds.push(data.followerId);
+      });
+
+      const results = await Promise.all(
+        followerIds.map(async (fid) => {
+          try {
+            const uSnap = await getDoc(doc(db, "users", fid));
+            if (uSnap && uSnap.exists()) {
+              const ud = uSnap.data();
+              return { id: fid, displayName: ud.displayName || ud.name || ud.handle || `user-${fid.slice(0, 6)}`, handle: ud.handle || null, email: ud.email || null, avatarUrl: ud.photoURL || ud.avatar || null };
+            }
+          } catch (e) { /* ignore individual failures */ }
+          return { id: fid, displayName: `user-${fid.slice(0, 6)}`, handle: null, email: null };
+        })
+      );
+
+      setShareFollowers(results.filter(Boolean));
+      setTimeout(() => setToast && setToast(null), 700);
+      return results;
+    } catch (err) {
+      console.error("loadFollowersForCurrentUser", err);
+      setShareFollowers([]);
+      setToast && setToast({ msg: "Failed to load followers", type: "warning" });
+      setTimeout(() => setToast && setToast(null), 1400);
+      return [];
+    }
+  }
+
+  // render
+  if (profileLoading) {
+    return (
+      <div className="travel-container" style={{ padding: 24 }}>
+        <h2>Loading profile…</h2>
+        <p className="muted">handle: @{normalizeHandle(routeHandle)}</p>
+      </div>
+    );
+  }
+
+  if (notFound) {
+    return (
+      <div className="travel-container" style={{ padding: 24 }}>
+        <h2>No user found for @{normalizeHandle(routeHandle)}</h2>
+        <p className="muted">Make sure the handle is correct and exists in Firestore.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="travel-container">
       {isOwner && getTripStatus(selectedTrip).key === "ongoing" && (
@@ -1417,10 +1562,35 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
           Check back later for live updates!
         </div>
       )}
+
+      {isOwner && (() => {
+        const { inGrace, remainingMs, expiredAtMs } = checkEndDateGrace(selectedTrip);
+        const isOwnerLocal = user && (selectedTrip.ownerId === user.uid || selectedTrip.owner_id === user.uid);
+        if (inGrace && isOwnerLocal) {
+          const hrs = Math.floor(remainingMs / (60 * 60 * 1000));
+          const mins = Math.floor((remainingMs % (60 * 60 * 1000)) / (60 * 1000));
+          const remainingLabel = `${hrs}h ${mins}m`;
+
+          return (
+            <div className="warning-banner" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+              <div>
+                ⚠️ This trip's end date ({formatDateForUI(expiredAtMs)}) has passed. You're inside a 5-hour grace period to stop or extend the trip.
+                <div style={{ fontSize: 13, color: "#eee", marginTop: 4 }}>Time left in grace period: {remainingLabel}</div>
+              </div>
+
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn-danger" onClick={() => { stopTripNow(); }} title="Stop trip now">Stop trip now</button>
+                <button className="btn-secondary" onClick={() => { extendEndBy24Hours(); }} title="Extend end date by 24 hours">Extend 24h</button>
+              </div>
+            </div>
+          );
+        }
+        return null;
+      })()}
+
       <header className="travel-header">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, width: "100%" }}>
           <div style={{ minWidth: 0 }}>
-            {/* Trip title */}
             <h1 style={{ marginBottom: 4, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                 <span style={{ whiteSpace: "nowrap", overflow: "visible" }}>
@@ -1435,7 +1605,7 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
                   <span
                     style={{
                       marginLeft: 6,
-                      backgroundColor: "#ef4444", // red
+                      backgroundColor: "#ef4444",
                       color: "white",
                       fontSize: "12px",
                       fontWeight: "bold",
@@ -1446,13 +1616,14 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
                     LIVE
                   </span>
                 )}
-
-
               </span>
 
               {selectedTrip && (
                 <span
-                  title={getVisibilityInfo(selectedTrip, user).label}
+                  title={(() => {
+                    const v = getVisibilityInfo(selectedTrip, user);
+                    return v.label;
+                  })()}
                   style={{ fontSize: 16, opacity: 0.9 }}
                 >
                   {getVisibilityInfo(selectedTrip, user).icon}
@@ -1460,7 +1631,6 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
               )}
             </h1>
 
-            {/* NEW: handler + followers */}
             {isPublicView && (
               <div style={{ fontSize: 13, color: "#aaa", marginBottom: 6 }}>
                 @{profile?.handle ?? profile?.displayName?.toLowerCase()?.replace(/\s+/g, "")}
@@ -1469,7 +1639,6 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
               </div>
             )}
 
-            {/* Existing trip info / bio */}
             {selectedTripId ? (
               <>
                 <div className="muted" style={{ fontSize: 13, marginBottom: 4 }}>
@@ -1508,7 +1677,6 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
             )}
           </div>
 
-          {/* Right side buttons */}
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {!isPublicView && (
               <>
@@ -1545,21 +1713,38 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
 
             )}
 
-            {/* Share profile */}
             {isPublicView && (
               <button
-                onClick={(e) => {
+                onClick={async (e) => {
                   e.stopPropagation();
-                  safeShare({
-                    url: window.location.href,
-                    title: profile?.displayName || `@${profile?.handle}`,
-                    text: `Check out this trip on MyApp`,
-                    onToast: (msg, type) => setToast({ msg, type })
+
+                  // Load followers if signed-in (optional)
+                  if (user && user.uid) {
+                    await loadFollowersForCurrentUser();
+                  } else {
+                    setShareFollowers([]);
+                  }
+
+                  // Determine whether we are sharing a trip (selectedTripId) or the profile
+                  const sharingTrip = Boolean(selectedTripId && selectedTrip); // selectedTripId exists and selectedTrip loaded
+                  const handleStr = profile?.handle || normalizeHandle(routeHandle) || "";
+                  const tripNameStr = sharingTrip ? (selectedTrip?.title || tripTitle || "") : "";
+
+                  setShareModalContext({
+                    isProfile: !sharingTrip,
+                    handle: handleStr,
+                    tripName: tripNameStr,
                   });
+
+                  setShowShareModal(true);
                 }}
                 aria-label="Share profile"
-              >Share</button>
+              >
+                Share
+              </button>
             )}
+
+
 
             {selectedTrip && user && (selectedTrip.ownerId === user.uid || selectedTrip.owner_id === user.uid) && (
               <button
@@ -1586,30 +1771,145 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
 
             <div style={{ display: "flex", gap: 20, marginTop: 18, flexWrap: "wrap" }}>
               <div style={{ flex: 2, minWidth: 320 }}>
-                <LiveVideoPanel selectedTrip={selectedTrip} isOwner={isOwner} applyLocalEdit={applyLocalEdit} user={user} db={db} useFirebase={useFirebase} setToast={setToast} />
-
-
+                {isTripActive(selectedTrip) && (
+                  <LiveVideoPanel selectedTrip={selectedTrip} isOwner={isOwner} applyLocalEdit={applyLocalEdit} user={user} db={db} useFirebase={useFirebase} setToast={setToast} />
+                )}
               </div>
 
-              <div style={{ width: 320, minWidth: 280, display: "flex", flexDirection: "column", gap: 12 }}>
-                {/* Compact live map (moved above Itinerary) */}
-                <LiveLocationPanel
-                  db={db}
-                  selectedTrip={selectedTrip}
-                  currentUserId={user?.uid}
-                  compact={true}
-                  mapHeight="220px"
-                  mapZoom={16}
-                />
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "row",
+                  gap: 16,
+                  width: "100%",
+                  alignItems: "stretch",
+                  minHeight: 0,
+                }}
+              >
+                <div
+                  style={{
+                    width: 320,
+                    minWidth: 280,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 12,
+                    minHeight: 0,
+                    borderRadius: 12,
+                    background: "var(--card-bg, transparent)",
+                  }}
+                >
+                  <div style={{ flex: "0 0 auto" }}>
+                    <LiveLocationPanel
+                      db={db}
+                      selectedTrip={selectedTrip}
+                      currentUserId={user?.uid}
+                      compact={true}
+                      mapHeight="180px"
+                      mapZoom={16}
+                    />
+                  </div>
 
-                {/* Itinerary sits below the compact live map */}
-                <ItineraryPanel itinerary={itinerary} canEditItinerary={canEditItinerary} setShowItineraryModal={setShowItineraryModal} confirmDeleteItinerary={confirmDeleteItinerary} />
+                  <div style={{ flex: "0 0 auto", padding: "0 8px" }}>
+                    <SightseeingPanel
+                      db={db}
+                      selectedTrip={selectedTrip}
+                      user={user}
+                      isPublicView={isPublicView}
+                      setToast={setToast}
+                      savedSights={savedSights}
+                    />
+                  </div>
+
+                  <div
+                    style={{
+                      width: 320,
+                      minWidth: 280,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 8,
+                    }}
+                  >
+                    {savedSights.length === 0 ? (
+                      <div className="muted" style={{ fontSize: 13 }}>
+                        No saved sights for this trip.
+                      </div>
+                    ) : (
+                      <div className="sightseeing-panel">
+                        {savedSights.map((s) => {
+                          const key = `${s.provider}:${s.placeId}:${s.id}`;
+                          return (
+                            <div key={key} className="sight-card" style={{ display: "flex", gap: 10, padding: 8, alignItems: "center" }}>
+                              <div className="sight-thumb" style={{ width: 56, height: 56, borderRadius: 6, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                {s.photoUrl ? (
+                                  <img src={s.photoUrl} alt={s.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                ) : (
+                                  <div className="sight-placeholder" style={{ fontSize: 12 }}>No photo</div>
+                                )}
+                              </div>
+
+                              <div className="sight-info" style={{ flex: 1, minWidth: 0 }}>
+                                <div className="sight-name" style={{ fontWeight: 600, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                  {s.name}
+                                </div>
+
+                                <div className="sight-meta" style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "normal" }}>
+                                  {s.category || ""}
+                                  {s.location?.address ? ` · ${s.location.address}` : ""}
+                                </div>
+                              </div>
+
+                              <div className="sight-actions" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                <button
+                                  className="btn-secondary inspect"
+                                  style={{ fontSize: 12, padding: "6px 8px" }}
+                                  onClick={() => {
+                                    const lat = s.location?.lat ?? s.location?.latitude ?? null;
+                                    const lng = s.location?.lng ?? s.location?.longitude ?? null;
+                                    if (lat == null || lng == null) {
+                                      setToast && setToast({ msg: "Saved sight has no coordinates", type: "warning" });
+                                      setTimeout(() => setToast && setToast(null), 1400);
+                                      return;
+                                    }
+                                    setPosition({ lat, lng, ts: Date.now() });
+                                    setToast && setToast({ msg: `Centering map on ${s.name}`, type: "info" });
+                                    setTimeout(() => setToast && setToast(null), 1200);
+                                  }}
+                                >
+                                  Inspect
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    flex: 1,
+                    display: "flex",
+                    flexDirection: "column",
+                  }}
+                >
+                  <ItineraryPanel
+                    itinerary={itinerary}
+                    canEditItinerary={canEditItinerary}
+                    setShowItineraryModal={setShowItineraryModal}
+                    confirmDeleteItinerary={confirmDeleteItinerary}
+                  />
+                </div>
               </div>
+
               <GalleryPanel
                 media={media}
                 setMedia={setMedia}
                 isPublicView={isPublicView}
+                selectedTrip={selectedTrip}
+                user={user}
               />
+
             </div>
           </main>
 
@@ -1644,8 +1944,8 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
           saving={savingEdit}
           onCancel={() => { setShowEditModal(false); setTripToEdit(null); }}
           onSave={handleSaveEdit}
-          db={db}                                 // <-- give modal access to Firestore client
-          ownerUid={user?.uid || null}            // <-- exclude owner from allowedUsers textarea
+          db={db}
+          ownerUid={user?.uid || null}
           resolveHandleToUid={resolveHandleToUidLocal}
           resolveUidToHandle={resolveUidToHandleLocal}
         />
@@ -1692,6 +1992,88 @@ export default function Travel({ externalHandle = null, externalSlug = null }) {
           </div>
         </Modal>
       )}
+
+      <ShareModal
+        open={showShareModal}
+        onClose={() => setShowShareModal(false)}
+        url={window.location.href}
+        // the friendly text shown in the modal uses displayTarget computed inside ShareModal,
+        // but we still provide helpful title/text for copy/share fallback:
+        title={shareModalContext.isProfile ? `@${shareModalContext.handle || (profile?.handle || "")}` : (shareModalContext.tripName || tripTitle)}
+        text={shareModalContext.isProfile ? `Check out @${shareModalContext.handle}` : `Check out "${shareModalContext.tripName}"`}
+        followers={shareFollowers}
+        initialSelected={[]}
+        onShareWithFollowers={async (selectedFollowerIds) => {
+          // app-specific logic: create notification docs, send push, etc.
+          // minimal Firestore example (optional) — you can keep your existing implementation here:
+          if (!useFirebase || !db || !user) {
+            setToast && setToast({ msg: "Shared locally (no Firebase)", type: "info" });
+            setTimeout(() => setToast && setToast(null), 1400);
+            return;
+          }
+
+          try {
+            const notifyTitle = shareModalContext.isProfile
+              ? `Shared profile @${shareModalContext.handle}`
+              : `Shared trip "${shareModalContext.tripName}"`;
+
+            await Promise.all(
+              selectedFollowerIds.map(async (fid) => {
+                const nref = doc(collection(db, "notifications"));
+                await setDoc(nref, {
+                  to: fid,
+                  from: user.uid || null,
+                  url: window.location.href,
+                  title: notifyTitle,
+                  type: "share",
+                  createdAt: serverTimestamp(),
+                  read: false,
+                });
+              })
+            );
+
+            setToast && setToast({ msg: `Shared with ${selectedFollowerIds.length} follower(s)`, type: "success" });
+            setTimeout(() => setToast && setToast(null), 1400);
+          } catch (err) {
+            console.error("onShareWithFollowers:", err);
+            setToast && setToast({ msg: "Failed to share with followers", type: "warning" });
+            setTimeout(() => setToast && setToast(null), 1600);
+          }
+        }}
+        db={db}
+        currentUserId={user?.uid}
+      />
+
+
     </div>
   );
+}
+
+// helper used in JSX but declared earlier
+function getVisibilityInfo(trip, user) {
+  if (!trip) return { icon: "❓", label: "Unknown" };
+  const visibility = trip.visibility || (trip.private ? "private" : "public");
+  const isOwnerLocal = user && (trip.ownerId === user.uid || trip.owner_id === user.uid);
+
+  if (visibility === "public") {
+    return { icon: "🌐", label: "Public" };
+  }
+
+  if (visibility === "restricted") {
+    if (isOwnerLocal) return { icon: "🔑", label: "Restricted (you own this)" };
+    if (Array.isArray(trip.allowedUsers) && user && trip.allowedUsers.includes(user.uid)) {
+      return { icon: "🔑", label: "Restricted (you have access)" };
+    }
+    return { icon: "🔑", label: "Restricted" };
+  }
+
+  if (visibility === "private") {
+    if (isOwnerLocal) return { icon: "🔒", label: "Private (you own this)" };
+    if (Array.isArray(trip.allowedUsers) && user && trip.allowedUsers.includes(user.uid)) {
+      return { icon: "🔑", label: "Restricted (you have access)" };
+    }
+    return { icon: "🔒", label: "Private" };
+  }
+
+  return { icon: "❓", label: "Unknown" };
 }

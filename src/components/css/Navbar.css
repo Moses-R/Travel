@@ -1,11 +1,15 @@
 /* ----------------------------------------------------------------------------
-   Navbar.css — Clean, professional theme-aware styles for Navbar component
-   - Uses CSS variables: --surface, --muted-surface, --text, --muted-text,
-     --border, --hover-bg, --focus-ring, --accent (accent is brand color)
+   Navbar.css — cleaned, theme-aware, scoped styles for Navbar & notifications
+   - Uses CSS variables for light/dark theme
    ---------------------------------------------------------------------------- */
 
+/* Base box sizing */
+* {
+  box-sizing: border-box;
+}
+
 /* -------------------------
-   Default variables fallback
+   Default variables (light defaults)
    ------------------------- */
 :root {
   --surface: #ffffff;
@@ -16,15 +20,27 @@
   --hover-bg: rgba(15, 23, 42, 0.04);
   --focus-ring: rgba(99, 102, 241, 0.12);
   --accent: #16a34a;
-  /* default brand green */
   --accent-contrast: #ffffff;
   --glass: rgba(255, 255, 255, 0.6);
   --radius: 12px;
   --navbar-height: 56px;
   --shadow-soft: 0 6px 18px rgba(2, 6, 23, 0.06);
+
+  /* Notification specific defaults */
+  --bg-surface: #ffffff;
+  --bg-surface-strong: #ffffff;
+  --text-primary: var(--text);
+  --text-muted: var(--muted-text);
+  --muted-bg: #fbfbfd;
+  --shadow: 0 8px 24px rgba(2, 6, 23, 0.08);
+  --badge-bg: #e0245e;
+  --badge-color: #fff;
+  --notif-width: 360px;
+  --notif-hover: #f3f3f3;
+  --transition-fast: 180ms ease;
 }
 
-/* Light theme (override if applied to body) */
+/* Theme overrides (apply by adding .light-theme or .dark-theme to body / root) */
 .light-theme {
   --surface: #ffffff;
   --muted-surface: #f7f8fb;
@@ -37,7 +53,6 @@
   --accent-contrast: #ffffff;
 }
 
-/* Dark theme (override if applied to body) */
 .dark-theme {
   --surface: #071022;
   --muted-surface: #0b1220;
@@ -48,16 +63,22 @@
   --focus-ring: rgba(16, 185, 129, 0.14);
   --accent: #16a34a;
   --accent-contrast: #0b1220;
-  --glass: rgba(9, 16, 28, 0.6);
+
+  /* notification overrides */
+  --bg-surface: #0b1220;
+  --bg-surface-strong: #07101a;
+  --text-primary: #eff6ff;
+  --text-muted: #9aa4b2;
+  --muted-bg: #07101a;
+  --shadow: 0 12px 30px rgba(0, 0, 0, 0.6);
+  --badge-bg: #ff6b94;
+  --badge-color: #061124;
+  --notif-hover: rgba(255, 255, 255, 0.03);
 }
 
 /* -------------------------
-   Global layout and navbar
+   Navbar layout
    ------------------------- */
-* {
-  box-sizing: border-box;
-}
-
 .navbar {
   height: var(--navbar-height);
   display: flex;
@@ -65,23 +86,23 @@
   justify-content: space-between;
   gap: 12px;
   padding: 0 18px;
-  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.02));
-  backdrop-filter: blur(6px);
   color: var(--text);
   border-bottom: 1px solid var(--border);
   z-index: 1000;
   position: relative;
   font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.02));
+  backdrop-filter: blur(6px);
 }
 
-/* left group */
+/* left */
 .navbar-left {
   display: flex;
   align-items: center;
   gap: 12px;
 }
 
-/* Logo */
+/* logo */
 .logo-button {
   background: transparent;
   border: none;
@@ -101,21 +122,21 @@
   letter-spacing: -0.2px;
 }
 
-/* Logo focus */
+/* logo focus (accessible) */
 .logo-button:focus {
   outline: none;
   box-shadow: 0 0 0 4px var(--focus-ring);
   border-radius: 10px;
 }
 
-/* right group */
+/* right */
 .navbar-right {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-/* theme toggle (icon only) */
+/* theme toggle */
 .theme-toggle-btn {
   display: inline-flex;
   align-items: center;
@@ -123,11 +144,11 @@
   width: 40px;
   height: 40px;
   border-radius: 10px;
-  border: 1px solid transparent;
   background: transparent;
   cursor: pointer;
   font-size: 16px;
   color: var(--text);
+  border: 1px solid transparent;
 }
 
 .theme-toggle-btn:hover {
@@ -140,9 +161,8 @@
 }
 
 /* -------------------------
-   Buttons: base and variants
+   Buttons (scoped)
    ------------------------- */
-/* Shared: .theme-btn keeps site-button consistency with Navbar */
 .theme-btn {
   font-weight: 600;
   font-size: 14px;
@@ -159,7 +179,6 @@
   transition: transform 120ms ease, box-shadow 160ms ease, background 160ms ease;
 }
 
-/* Text-only primary (Login / Signup) — intentionally link-like */
 .theme-btn.primary {
   background: transparent !important;
   border: none !important;
@@ -167,7 +186,6 @@
   color: var(--text) !important;
   padding: 6px 8px;
   font-weight: 700;
-  letter-spacing: 0.15px;
 }
 
 .theme-btn.primary:hover {
@@ -181,7 +199,6 @@
   border-radius: 8px;
 }
 
-/* Optionally, solid accent button for other actions (kept for Add Trip etc) */
 .theme-btn.accent {
   background: linear-gradient(180deg, rgba(22, 163, 74, 0.98), rgba(16, 134, 61, 0.98));
   color: var(--accent-contrast);
@@ -195,7 +212,7 @@
 }
 
 /* -------------------------
-   User menu (signed in)
+   User menu
    ------------------------- */
 .user-menu {
   position: relative;
@@ -225,7 +242,6 @@
   border-radius: 10px;
 }
 
-/* dropdown card */
 .user-dropdown {
   position: absolute;
   right: 0;
@@ -240,19 +256,6 @@
   z-index: 1400;
   transform-origin: top right;
   animation: fadeInUp 160ms cubic-bezier(.2, .9, .2, 1);
-}
-
-/* dropdown animation */
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(-6px) scale(.995);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
 }
 
 .user-dropdown .dropdown-item {
@@ -272,15 +275,7 @@
   background: var(--hover-bg);
 }
 
-/* disabled/aria-disabled */
-.user-dropdown .dropdown-item[disabled],
-.user-dropdown .dropdown-item:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  color: var(--muted-text);
-}
-
-/* small helper classes */
+/* small helpers */
 .hidden {
   display: none !important;
 }
@@ -291,9 +286,119 @@
   white-space: nowrap;
 }
 
+/* dropdown animation */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(.995);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 /* -------------------------
-   Responsive tweaks
+   Notification styles (scoped)
    ------------------------- */
+.notif-wrapper {
+  position: relative;
+}
+
+.notif-bell {
+  position: relative;
+  background: transparent;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 6px;
+  color: var(--text-primary);
+  transition: color var(--transition-fast);
+}
+
+.notif-badge {
+  position: absolute;
+  top: 0px;
+  right: -6px;
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  border-radius: 999px;
+  background: var(--badge-bg);
+  color: var(--badge-color);
+  font-size: 12px;
+  text-align: center;
+  padding: 0 6px;
+  box-sizing: border-box;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.12);
+}
+
+.notif-dropdown {
+  position: absolute;
+  right: 0;
+  top: 36px;
+  width: var(--notif-width);
+  background: var(--bg-surface);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  z-index: 2000;
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  transition: background var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.notif-dropdown-header {
+  background: var(--bg-surface-strong);
+  border-bottom: 1px solid var(--border);
+  padding: 8px 12px;
+}
+
+.notif-list {
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--bg-surface);
+}
+
+.notif-item {
+  padding: 10px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  transition: background var(--transition-fast);
+}
+
+.notif-item.unread {
+  background: var(--muted-bg);
+}
+
+.notif-item .title {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.notif-item .text {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.notif-action {
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: var(--text-primary);
+  border: none;
+  transition: background var(--transition-fast);
+}
+
+.notif-action:hover {
+  background: var(--notif-hover);
+}
+
+/* responsive tweaks */
 @media (max-width: 640px) {
   .navbar {
     padding: 0 12px;
@@ -317,13 +422,25 @@
   }
 }
 
-/* Prevent focus outline from being invisible */
+@media (max-width: 480px) {
+  :root {
+    --notif-width: 300px;
+  }
+
+  .notif-dropdown {
+    right: 6px;
+    left: 6px;
+    width: auto;
+  }
+}
+
+/* Accessibility: remove invisible focus outlines but keep custom focus */
 button:focus,
 a:focus {
   outline: none;
 }
 
-/* Forced-color mode accessibility */
+/* forced-color mode safety */
 @media (forced-colors: active) {
 
   .user-button,

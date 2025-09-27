@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, useNavigate, useParams } from "react-router-dom";
 
-import HomePage from "./pages/Home";   // landing page
+import HomePage from "./pages/Home"; // landing page
 import TravelPage from "./pages/Travel"; // public profile / trip page
 import Test from "./pages/Test";
 import createTripCallableFactory from "./api/createTripCallable";
@@ -21,12 +21,28 @@ import { normalizeHandle } from "./utils/handle";
 import { auth } from "./firebase";
 import { useTheme } from "./context/ThemeContext";
 
+/**
+ * API base selection:
+ * - If REACT_APP_API_BASE is set, use it.
+ * - Else if REACT_APP_USE_EMULATOR === "true", use REACT_APP_EMULATOR_URL or a sensible default.
+ * - Otherwise fall back to the deployed Cloud Function URL.
+ */
+const DEFAULT_API = "https://us-central1-travel-6c761.cloudfunctions.net/api";
+const API_BASE =
+  process.env.REACT_APP_API_BASE ||
+  (process.env.REACT_APP_USE_EMULATOR === "true"
+    ? process.env.REACT_APP_EMULATOR_URL ||
+    "http://127.0.0.1:5001/travel-6c761/us-central1/api"
+    : DEFAULT_API);
+
 /* Wrapper component to pass handle + slug params to TravelPage */
 function TravelPageWithHandle() {
   const { handle: rawHandleParam, slug: rawSlugParam } = useParams();
 
-  const rawHandle = typeof rawHandleParam === "string" ? decodeURIComponent(rawHandleParam) : "";
-  const rawSlug = typeof rawSlugParam === "string" ? decodeURIComponent(rawSlugParam) : "";
+  const rawHandle =
+    typeof rawHandleParam === "string" ? decodeURIComponent(rawHandleParam) : "";
+  const rawSlug =
+    typeof rawSlugParam === "string" ? decodeURIComponent(rawSlugParam) : "";
 
   let handle = "";
   let slug = "";
@@ -100,11 +116,6 @@ function App() {
   const { currentUser } = useAuth();
   const { theme } = useTheme();
 
-  const EMULATOR = false;
-  const API_BASE = EMULATOR
-    ? "http://127.0.0.1:5001/travel-6c761/us-central1/api"
-    : "https://us-central1-travel-6c761.cloudfunctions.net/api";
-
   useEffect(() => {
     // Example: dynamic tab title
     if (currentUser) {
@@ -126,7 +137,6 @@ function App() {
     window.addEventListener("jift:openAddTrip", onOpenFromAnywhere);
     return () => window.removeEventListener("jift:openAddTrip", onOpenFromAnywhere);
   }, []);
-
 
   const createTripCallable = React.useMemo(() => {
     return createTripCallableFactory({ auth, apiBase: API_BASE });
@@ -224,7 +234,16 @@ function App() {
 
         {/* Inline error toast */}
         {saveError && (
-          <div style={{ position: "fixed", bottom: 20, right: 20, background: "#ffe6e6", padding: 12, borderRadius: 8 }}>
+          <div
+            style={{
+              position: "fixed",
+              bottom: 20,
+              right: 20,
+              background: "#ffe6e6",
+              padding: 12,
+              borderRadius: 8,
+            }}
+          >
             <strong>Error:</strong> {saveError}
           </div>
         )}

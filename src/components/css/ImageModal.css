@@ -1,0 +1,416 @@
+/* ImgModal.css
+   Theme-aligned modal stylesheet (drop-in replacement)
+   Uses the same variable strategy as EditTripModal.css for predictable light/dark behavior
+*/
+
+/* ---------- Theme variables for ImgModal ---------- */
+:root {
+    --bg: #ffffff;
+    --panel-bg: #fafafa;
+    --text: #0f172a;
+    --muted: #6b7280;
+    --control-bg: #efefef;
+    --control-text: #0f172a;
+    --primary-bg: #2b7cff;
+    --primary-text: #ffffff;
+    --border: rgba(15, 23, 42, 0.06);
+    --soft-border: rgba(15, 23, 42, 0.04);
+    --focus-ring: rgba(59, 130, 246, 0.25);
+    --shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+/* Dark theme: auto-apply on prefers-color-scheme or with .dark-theme wrapper */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #0b0b0f;
+        --panel-bg: #0f1720;
+        --text: #e6eef6;
+        --muted: #9aa4b2;
+        --control-bg: #1b1f26;
+        --control-text: #e6eef6;
+        --primary-bg: #1f6feb;
+        --primary-text: #ffffff;
+        --border: rgba(255, 255, 255, 0.06);
+        --soft-border: rgba(255, 255, 255, 0.04);
+        --focus-ring: rgba(59, 130, 246, 0.25);
+        --shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+    }
+}
+
+/* Explicit theme wrappers */
+.light-theme {
+    --bg: #ffffff;
+    --panel-bg: #fafafa;
+    --text: #0f172a;
+    --muted: #6b7280;
+    --control-bg: #efefef;
+    --control-text: #0f172a;
+    --primary-bg: #2b7cff;
+    --primary-text: #ffffff;
+    --border: rgba(15, 23, 42, 0.06);
+    --shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+.dark-theme {
+    --bg: #0b0b0f;
+    --panel-bg: #0f1720;
+    --text: #e6eef6;
+    --muted: #9aa4b2;
+    --control-bg: #1b1f26;
+    --control-text: #e6eef6;
+    --primary-bg: #1f6feb;
+    --primary-text: #ffffff;
+    --border: rgba(255, 255, 255, 0.06);
+    --shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+}
+
+/* ---------- Overlay + modal shell ---------- */
+.img-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 10, 12, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1200;
+    padding: 20px;
+}
+
+/* modal */
+.img-modal {
+    width: 100%;
+    max-width: 1200px;
+    height: 85vh;
+    background: var(--bg);
+    color: var(--text);
+    border-radius: 10px;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    box-shadow: var(--shadow);
+    transition: background-color 0.2s ease, color 0.2s ease;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* ---------- Left: image area ---------- */
+.img-left {
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.img-left-inner {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.img-full {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+    user-select: none;
+    background: #000;
+}
+
+/* ---------- Right: info panel ---------- */
+.img-right {
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: var(--panel-bg);
+    color: var(--text);
+}
+
+/* header row */
+.img-right-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+/* title */
+.img-title {
+    margin: 0;
+    font-size: 16px;
+    line-height: 1.1;
+    font-weight: 600;
+    max-width: 60%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
+}
+
+/* action buttons container */
+.img-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+/* ---------- Buttons ---------- */
+.btn {
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    background: var(--control-bg);
+    color: var(--control-text);
+    transition: transform 0.06s ease, background-color 0.12s ease, color 0.12s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn:active {
+    transform: translateY(1px);
+}
+
+/* primary / download */
+.btn-primary,
+.btn-download {
+    background: var(--primary-bg);
+    color: var(--primary-text);
+    border: none;
+}
+
+/* close button */
+.btn-close {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 8px 10px;
+}
+
+/* accessibility focus */
+.thumb-button:focus,
+.btn:focus,
+.btn-close:focus {
+    outline: 3px solid var(--focus-ring);
+    outline-offset: 2px;
+    border-radius: 6px;
+}
+
+/* ---------- Meta list (date, size, etc.) ---------- */
+.meta-list {
+    margin-top: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.meta-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: center;
+    padding: 6px 8px;
+    background: transparent;
+    border-radius: 6px;
+}
+
+.meta-key {
+    font-size: 13px;
+    color: var(--muted);
+    flex: 0 0 auto;
+    width: 45%;
+    font-weight: 600;
+}
+
+.meta-val {
+    font-size: 14px;
+    font-weight: 500;
+    text-align: right;
+    color: var(--text);
+    flex: 1 1 auto;
+    word-break: break-word;
+}
+
+/* small value style */
+.meta-val.small {
+    font-size: 12px;
+    word-break: break-all;
+    text-align: left;
+    color: var(--muted);
+}
+
+/* ---------- Map area ---------- */
+.map-wrapper {
+    margin-top: 8px;
+    flex: 1 1 auto;
+    min-height: 160px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #eaeaea;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--soft-border);
+}
+
+.map-iframe {
+    width: 100%;
+    height: 100%;
+    border: 0;
+}
+
+/* no-gps state */
+.map-empty {
+    padding: 12px;
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+}
+
+/* marker rendering tweaks (leaflet) */
+.leaflet-container .leaflet-marker-icon {
+    transform: translate(-12px, -41px);
+    width: 31px !important;
+    height: 50px !important;
+    image-rendering: optimizeQuality;
+    z-index: 400 !important;
+}
+
+.leaflet-container .leaflet-marker-shadow {
+    width: 41px !important;
+    height: 25px !important;
+    z-index: 390 !important;
+}
+
+/* ---------- Responsive adjustments ---------- */
+@media (max-width: 1100px) {
+    .img-modal {
+        max-width: 960px;
+        grid-template-columns: 1fr 320px;
+    }
+}
+
+@media (max-width: 880px) {
+    .img-modal {
+        grid-template-columns: 1fr;
+        height: 90vh;
+    }
+
+    .img-right {
+        order: 2;
+        max-height: 42vh;
+        overflow: auto;
+    }
+
+    .img-left {
+        order: 1;
+        height: 48vh;
+    }
+}
+
+/* smaller screens: compact spacing */
+@media (max-width: 420px) {
+    .img-right {
+        padding: 12px;
+    }
+
+    .img-title {
+        font-size: 14px;
+    }
+
+    .meta-key {
+        font-size: 12px;
+    }
+}
+
+/* ---------- Utility / robustness rules ---------- */
+/* ensure text inside the modal respects theme color */
+.img-modal,
+.img-modal * {
+    color: inherit;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* ensure modal right panel explicitly uses our panel colors */
+.img-modal .img-right {
+    background: var(--panel-bg);
+    color: var(--text);
+}
+
+/* Make sure meta text is readable (explicit) */
+.img-modal .meta-key {
+    color: var(--muted) !important;
+}
+
+.img-modal .meta-val {
+    color: var(--text) !important;
+}
+
+/* Ensure default buttons are readable; keep primary/download accent */
+.img-modal .btn {
+    color: var(--control-text) !important;
+    background: var(--control-bg) !important;
+}
+
+.img-modal .btn-primary,
+.img-modal .btn-download {
+    color: var(--primary-text) !important;
+    background: var(--primary-bg) !important;
+}
+
+/* Close button explicit for absolute safety */
+.img-modal .btn-close {
+    color: var(--text) !important;
+    border: 1px solid var(--border) !important;
+    background: transparent !important;
+}
+
+/* ensure action areas are visible even when parent rules try to hide them */
+.img-modal .meta-list,
+.img-modal .img-right-header,
+.img-modal .img-actions {
+    opacity: 1 !important;
+    visibility: visible !important;
+    font-size: 14px !important;
+}
+
+/* make links inside modal visible and themed */
+.img-modal a {
+    color: var(--primary-bg);
+    text-decoration: underline;
+}
+
+/* small code blocks inside the modal (readable) */
+.img-modal code {
+    background: rgba(0, 0, 0, 0.04);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: inherit;
+    font-size: 12px;
+}
+
+/* Focus ring for keyboard users */
+.btn:focus,
+.btn-close:focus {
+    box-shadow: 0 0 0 4px var(--focus-ring);
+    outline: none;
+}
+
+/* final safety: if a parent forcibly sets color, prefer our theme colors for important UI text */
+@media (prefers-color-scheme: light),
+(prefers-color-scheme: no-preference) {
+
+    .img-modal .meta-key,
+    .img-modal .meta-val,
+    .img-modal .img-title,
+    .img-modal .btn-close,
+    .img-modal .btn {
+        color: var(--text) !important;
+    }
+}
